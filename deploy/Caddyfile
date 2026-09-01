@@ -1,0 +1,8 @@
+# Replace the name, then: sudo cp deploy/Caddyfile /etc/caddy/Caddyfile && sudo systemctl reload caddy
+# No domain yet? <dashed-ip>.sslip.io resolves to that IP and gets a real
+# certificate, e.g. 143-198-1-2.sslip.io
+village.example.com {
+	encode gzip
+	# Caddy proxies WebSockets with no extra directives, and renews TLS itself.
+	reverse_proxy 127.0.0.1:8000
+}

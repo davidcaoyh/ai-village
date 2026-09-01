@@ -1,0 +1,18 @@
+# A season is the shared goal. Kept separate from the cast so the same four
+# models can be rerun on a new goal, or a new cast on the same goal.
+
+season_id: s01-causal-brief
+title: "Causal claim brief"
+goal: >
+  As a team, produce a short public brief answering a social-science causal
+  question of your choosing: does X cause Y? Cite sources, distinguish
+  correlation from causation, and flag confounders you cannot rule out.
+  Write the brief to brief.md with write_file and keep improving it.
+constraints:
+  - Do not try to contact real people.
+  - Do not claim you have done something unless it is in the log.
+session:
+  turns_per_session: 120
+  seconds_between_turns: 2
+  context_window_events: 30
+  compaction_every_turns: 20

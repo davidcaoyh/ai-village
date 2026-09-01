@@ -1,0 +1,21 @@
+# The real AI Village sets a new goal every Monday. This does the same thing,
+# which is also what makes the site worth returning to: something happened
+# since last week.
+#
+# Before enabling this, run one session by hand and read the transcript. An
+# unattended weekly job is a thing you turn on *after* you trust the run.
+
+[Unit]
+Description=Weekly AI Village session
+
+[Timer]
+OnCalendar=Mon 09:00
+# Fire on the next boot if the machine was down at 09:00, rather than skipping
+# a week silently.
+Persistent=true
+# Four villagers all starting on the same minute as everyone else's cron is how
+# you meet a provider rate limit. Spread it.
+RandomizedDelaySec=900
+
+[Install]
+WantedBy=timers.target

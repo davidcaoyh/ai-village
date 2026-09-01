@@ -1,0 +1,28 @@
+# One village session. Oneshot, not a daemon: a session is a bounded job with a
+# turn cap and a spend cap, and "it ended" is the normal outcome. Restart=always
+# here would be a machine that spends money forever.
+# install: sudo cp deploy/village-session.{service,timer} /etc/systemd/system/
+#          sudo systemctl enable --now village-session.timer
+
+[Unit]
+Description=Run one AI Village session
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=village
+Group=village
+WorkingDirectory=/opt/village
+EnvironmentFile=/etc/village.env
+ExecStart=/opt/village/.venv/bin/python -m scripts.run_session
+
+# A session that hangs on a provider must not still be running when the next
+# one starts. Two hours is far beyond a 120-turn run at 2s spacing.
+TimeoutStartSec=7200
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/village/runs

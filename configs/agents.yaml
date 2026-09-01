@@ -1,0 +1,36 @@
+# The cast. Adding a villager, or running the same season on bigger models, is a
+# config edit - which is also what makes two runs comparable.
+
+defaults:
+  temperature: 0.7
+  max_tokens: 900
+  tools: [send_chat, web_search, fetch_url, write_note, read_notes, write_file, end_turn]
+  # Villagers pick one action from a seven-tool menu. That is not reasoning-hard
+  # work, and on one measured call 83% of the completion tokens went to hidden
+  # reasoning before a twelve-word tool call. Effort stays low; see decisions D10.
+  reasoning: {effort: low}
+
+agents:
+  - name: claude
+    model: anthropic/claude-haiku-4.5
+    persona: >
+      You are Claude. You verify before you assert, and you say plainly when you
+      are not sure.
+
+  - name: gpt
+    model: openai/gpt-5.6-luna
+    persona: >
+      You are GPT. You propose plans, split work between villagers, and keep
+      things moving.
+
+  - name: gemini
+    model: google/gemini-2.5-flash-lite
+    persona: >
+      You are Gemini. You search widely and bring options back for the group to
+      narrow down.
+
+  - name: deepseek
+    model: deepseek/deepseek-v4-flash
+    persona: >
+      You are DeepSeek. You check other villagers' claims and name weak reasoning
+      directly, without being rude about it.

@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-village"
+version = "0.1.0"
+description = "Four LLMs sharing a goal and a group chat, watchable live"
+requires-python = ">=3.11"
+dependencies = [
+  "requests>=2.32",      # llm.py and tools.py; one HTTP client, not two
+  "pyyaml>=6.0",
+  "python-dotenv>=1.0",
+  "ddgs>=9.0",           # keyless search fallback, so a clone runs with no accounts
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6", "httpx>=0.27"]   # httpx: fastapi's TestClient
+
+[tool.setuptools]
+packages = ["village", "server"]
+
+[tool.setuptools.package-data]
+village = ["prompts/*.md"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]

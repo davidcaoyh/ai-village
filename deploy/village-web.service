@@ -1,0 +1,26 @@
+# The spectator site. Always on, holds no state, safe to restart at any moment:
+# it only reads the SQLite file the session process writes.
+# install: sudo cp deploy/village-web.service /etc/systemd/system/
+
+[Unit]
+Description=AI Village spectator site
+After=network.target
+
+[Service]
+User=village
+Group=village
+WorkingDirectory=/opt/village
+EnvironmentFile=/etc/village.env
+ExecStart=/opt/village/.venv/bin/uvicorn server.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+
+# Bound to localhost above; Caddy is the only thing that talks to it.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/village/runs
+
+[Install]
+WantedBy=multi-user.target
