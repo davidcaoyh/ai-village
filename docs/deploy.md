@@ -68,7 +68,7 @@ python -m scripts.run_session --fake --turns 16 --delay 0
 uvicorn server.main:app --port 8000     # open http://localhost:8000
 ```
 
-**Expect:** 59 tests pass; the fake run prints 16 turns and ends with
+**Expect:** 70 tests pass; the fake run prints 16 turns and ends with
 `turn_cap`; the page shows four columns filling in, a rising cost pill, and a
 group chat. If any of that is wrong, fix it here — debugging it over SSH is
 strictly worse.

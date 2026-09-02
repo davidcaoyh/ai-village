@@ -94,7 +94,8 @@ class Agent:
                                  "content": observation})
 
             if ctx.turn_over:
-                return self._end(store, session_id, ctx, "end_turn", ctx.turn_summary)
+                by = "vote_done" if ctx.turn_summary.startswith("voted") else "end_turn"
+                return self._end(store, session_id, ctx, by, ctx.turn_summary)
 
         return self._end(store, session_id, ctx, "step_cap",
                          f"used all {max_steps} steps without ending the turn")

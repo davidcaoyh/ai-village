@@ -44,7 +44,11 @@ def _describe(event: dict, viewer: str) -> str | None:
         # agent told only "(result: 5)" re-runs the same search and pays twice.
         text = str(payload.get("text", ""))[:OWN_RESULT_CHARS]
         return f"(what your {payload.get('name')} returned: {text})"
+    if kind == "vote_done":
+        return f"({who} voted that the goal is done: {payload.get('reason', '')})"
     if kind == "system":
+        if payload.get("kind") == "goal_advanced":
+            return f"(the village finished a goal. The new one: {payload.get('goal', '')})"
         k = payload.get("kind")
         if k == "human_message":
             return f"[a human watching] {payload.get('message', '')}"

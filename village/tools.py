@@ -272,6 +272,21 @@ def edit_file(ctx: ToolContext, path: str, section: str, text: str) -> str:
     return f"{action} '{section}' in {safe} ({len(updated)} chars total)"
 
 
+@tool("vote_done",
+      "Say the season goal is fully met and nothing useful remains. Ends your turn. "
+      "The village stops only when every villager has an unbeaten vote, and any file "
+      "written after yours cancels it.",
+      {"reason": {"type": "string", "description": "why you believe it is finished"}},
+      ["reason"])
+def vote_done(ctx: ToolContext, reason: str) -> str:
+    # Voting and then carrying on acting would refute itself, so the vote ends the
+    # turn. It also prices an idle round at one call per villager instead of eight.
+    ctx.log("vote_done", {"reason": reason})
+    ctx.turn_over = True
+    ctx.turn_summary = f"voted the goal is done: {reason}"
+    return "vote recorded. It stands until someone writes to a file, or the goal moves on."
+
+
 @tool("end_turn", "Finish your turn and hand over to the next villager.",
       {"summary": {"type": "string", "description": "one line on what you did"}}, ["summary"])
 def end_turn(ctx: ToolContext, summary: str) -> str:

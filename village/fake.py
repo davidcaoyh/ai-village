@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import itertools
 import random
+import re
 from typing import Any
 
 from village.llm import LLMResponse
@@ -64,6 +65,12 @@ _COMPACTED = (
 )
 
 
+# A queued season names a different file in each goal (brief.md, brief-2.md...).
+# The fake finds it the way a real villager would - by reading the goal - so an
+# offline run exercises the queue rather than rewriting goal one three times.
+_TARGET = re.compile(r"brief(?:-\d+)?\.md")
+
+
 class ScriptedModel:
     """Callable with the same signature as `village.llm.chat`.
 
@@ -76,10 +83,17 @@ class ScriptedModel:
         self.agent = agent_name
         self.rng = random.Random(seed if seed is not None else hash(agent_name) & 0xFFFF)
         self.step = itertools.count()
+        self.edits = 0
+        self.path = "brief.md"
 
     def __call__(self, model: str, messages: list[dict[str, Any]], tools=None,
                  temperature: float = 0.7, max_tokens: int = 900,
                  reasoning=None) -> LLMResponse:
+        system = (messages[0].get("content") or "") if messages else ""
+        found = _TARGET.search(system)
+        if found and found.group(0) != self.path:
+            self.path, self.edits = found.group(0), 0     # new goal, new file, start over
+
         if not tools:
             # No tools means the compaction call, so offline runs exercise it too.
             return self._response(text=_COMPACTED, calls=[], finish_reason="stop",
@@ -91,17 +105,24 @@ class ScriptedModel:
         # Three model calls per turn: act, act, end. Bounded on purpose - an
         # agent that never calls end_turn is a real failure mode, and the fake
         # cast should not be the thing that exercises the step cap.
-        # chat, look, edit, hand over. Four calls per turn, bounded on purpose: an
-        # agent that never calls end_turn is a real failure mode, and the fake cast
-        # should not be the thing that exercises the step cap.
+        # Once the brief has all its sections there is nothing left to do, and the
+        # offline cast votes rather than inventing verification work - the same
+        # behaviour the prompt asks of a live one.
+        if self.edits >= len(_SECTIONS) and "vote_done" in allowed:
+            return self._response(text=None, messages=messages, finish_reason="tool_calls",
+                                  calls=[{"id": f"call_{n}", "name": "vote_done",
+                                          "arguments": {"reason": "every section is written"},
+                                          "parse_error": None}])
+
         phase = n % 4
         if phase == 0 and "send_chat" in allowed:
             call = ("send_chat", {"message": self.rng.choice(_LINES)})
         elif phase == 1 and "read_file" in allowed:
-            call = ("read_file", {"path": "brief.md"})
+            call = ("read_file", {"path": self.path})
         elif phase == 2 and "edit_file" in allowed:
-            heading, text = self.rng.choice(_SECTIONS)
-            call = ("edit_file", {"path": "brief.md", "section": heading, "text": text})
+            heading, text = _SECTIONS[self.edits % len(_SECTIONS)]
+            self.edits += 1
+            call = ("edit_file", {"path": self.path, "section": heading, "text": text})
         elif phase == 2 and "write_note" in allowed:
             call = ("write_note", {"text": self.rng.choice(_NOTES)})
         else:

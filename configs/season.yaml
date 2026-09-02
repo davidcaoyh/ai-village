@@ -2,33 +2,39 @@
 # models can be rerun on a new goal, or a new cast on the same goal.
 
 season_id: s01-causal-brief
-title: "Causal claim brief"
-# The section list is the coordination device. Without it every villager rewrote
-# the whole file from memory and clobbered the others: 30 whole-file writes in
-# the Sep 2 run, sizes swinging between 49 and 4,150 chars and never converging.
+title: "Causal claim briefs"
+
+# One goal, run again and again. Each time the village votes it done (D36) the
+# orchestrator starts the next round on a fresh file - brief.md, brief-2.md,
+# brief-3.md - so a session that finishes early keeps producing instead of
+# spending its remaining turns agreeing it is finished. {file} and {round} are
+# filled in per round. The session now ends on the turn cap or the spend cap,
+# which is the shape the real AI Village runs: time-boxed, not task-boxed.
+repeat: true
+artifact_stem: brief
 goal: >
-  As a team, produce a short public brief in brief.md answering a social-science
-  causal question of your choosing: does X cause Y?
+  Round {round}. As a team, produce a short public brief in {file} answering a
+  social-science causal question of your choosing: does X cause Y?
 
-  brief.md has exactly these sections, in this order:
-  "## Question", "## Answer", "## Evidence", "## Correlation vs causation",
-  "## Confounders we cannot rule out", "## Sources".
+  It must be a question the village has not answered in an earlier round.
+  list_files shows what you have already written, and read_file shows what is
+  in them - check before you choose, and pick a different field if you can.
 
-  Claim a section in chat, then edit_file that one section. Read the file before
-  you touch it. Two villagers editing the same section overwrite each other, so
-  say which one you are taking.
-
-  Cite real sources with urls. Distinguish correlation from causation. Name the
-  confounders you cannot rule out rather than hiding them.
 constraints:
   - Do not try to contact real people.
   - Do not claim you have done something unless it is in the log.
+  - 'Every brief has exactly these sections, in this order: "## Question",
+    "## Answer", "## Evidence", "## Correlation vs causation",
+    "## Confounders we cannot rule out", "## Sources".'
+  - Claim a section in chat, then edit_file that one section. Read the file
+    before you touch it. Two villagers editing the same section overwrite each
+    other, so say which one you are taking.
+  - Cite real sources with urls. Distinguish correlation from causation. Name
+    the confounders you cannot rule out rather than hiding them.
 session:
   turns_per_session: 120
   seconds_between_turns: 2
   context_window_events: 30
-  # 20 meant compaction never fired: 4 villagers over 120 turns is 30 turns each,
-  # and the Sep 2 run stopped at 18. At 8 every villager compacts three times.
   compaction_every_turns: 8
-  # DeepSeek hit the 6-step cap on 18 of its turns. Research then write needs room.
   max_steps_per_turn: 8
+  max_idle_rounds: 3

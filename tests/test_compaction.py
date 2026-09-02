@@ -54,9 +54,11 @@ def store(tmp_path):
 
 @pytest.fixture
 def season():
+    # max_idle_rounds=0: this file is about compaction, and its stub model only
+    # calls end_turn, which the backstop correctly reads as an idle village.
     return SeasonConfig(season_id="test", goal="Test the village.", turns_per_session=4,
                         seconds_between_turns=0, context_window_events=30,
-                        compaction_every_turns=0)
+                        compaction_every_turns=0, max_idle_rounds=0)
 
 
 def _agent(model, name="claude"):

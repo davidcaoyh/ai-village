@@ -104,6 +104,52 @@ class Store:
                 notes.append(args["text"])
         return notes
 
+    def standing_votes(self, session_id: str) -> set[str]:
+        """Agents whose vote that the goal is done has not been overtaken.
+
+        A vote is cancelled by anything that changes the artifact it was cast
+        over, or by the goal moving on. Chat does not cancel it: the run this
+        was written for produced 67 messages agreeing the brief was finished,
+        and a village that talks itself alive is the failure being fixed.
+        """
+        row = self.db.execute(
+            """SELECT COALESCE(MAX(id), 0) AS id FROM events
+               WHERE session_id=? AND (
+                   (type='action' AND json_extract(payload_json,'$.name')
+                        IN ('write_file','edit_file'))
+                   OR json_extract(payload_json,'$.kind')='goal_advanced')""",
+            (session_id,),
+        ).fetchone()
+        rows = self.db.execute(
+            """SELECT DISTINCT agent FROM events
+               WHERE session_id=? AND type='vote_done' AND id>? AND agent IS NOT NULL""",
+            (session_id, row["id"]),
+        ).fetchall()
+        return {r["agent"] for r in rows}
+
+    def newest_substantive_action(self, session_id: str, exempt: tuple[str, ...]) -> int:
+        """Id of the last action that moved the goal, ignoring the passive ones.
+
+        Read from the log rather than counted in memory so a resumed session
+        inherits how idle the village already was.
+        """
+        placeholders = ",".join("?" * len(exempt))
+        row = self.db.execute(
+            f"""SELECT COALESCE(MAX(id), 0) AS id FROM events
+                WHERE session_id=? AND type='action'
+                  AND json_extract(payload_json,'$.name') NOT IN ({placeholders})""",
+            (session_id, *exempt),
+        ).fetchone()
+        return int(row["id"])
+
+    def goals_advanced(self, session_id: str) -> int:
+        r = self.db.execute(
+            """SELECT COUNT(*) AS n FROM events WHERE session_id=?
+               AND json_extract(payload_json,'$.kind')='goal_advanced'""",
+            (session_id,),
+        ).fetchone()
+        return int(r["n"])
+
     def stop_requested(self, session_id: str) -> bool:
         r = self.db.execute(
             """SELECT 1 FROM events WHERE session_id=? AND type='system'

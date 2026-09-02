@@ -10,7 +10,7 @@ defaults:
   # read_notes is deliberately absent: notes are already in the system prompt, so
   # the tool spent 32 calls in the Sep 2 run re-reading what the agent could see.
   tools: [send_chat, web_search, fetch_url, write_note,
-          list_files, read_file, write_file, edit_file, end_turn]
+          list_files, read_file, write_file, edit_file, vote_done, end_turn]
   # Villagers pick one action from a menu. That is not reasoning-hard work, and on
   # one measured call 83% of the completion tokens went to hidden reasoning before
   # a twelve-word tool call. Effort stays low; see decisions D10.
