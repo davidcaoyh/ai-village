@@ -48,7 +48,10 @@ install -m644 "$SRC/deploy/village-web.service" /etc/systemd/system/
 install -m644 "$SRC/deploy/village-session.service" /etc/systemd/system/
 install -m644 "$SRC/deploy/village-session.timer" /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now village-web
+# enable, then restart. `enable --now` only starts a stopped unit, so re-running
+# this script to ship new code would leave the old uvicorn process serving it.
+systemctl enable village-web
+systemctl restart village-web
 
 ufw allow 22/tcp >/dev/null && ufw allow 80/tcp >/dev/null && ufw allow 443/tcp >/dev/null
 ufw --force enable >/dev/null

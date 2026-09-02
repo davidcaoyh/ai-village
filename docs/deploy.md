@@ -252,8 +252,28 @@ written gives you a file that may not open.
 sqlite3 /opt/village/runs/village.db ".backup /root/village-$(date +%F).db"
 ```
 
-**Updating.** `git -C /opt/village pull && systemctl restart village-web`. The
-schema is `CREATE TABLE IF NOT EXISTS`, so old sessions keep replaying.
+**Updating.** From your laptop, not from the box:
+
+```bash
+bash deploy/redeploy.sh root@<ip>
+```
+
+It rsyncs the working tree, reinstalls the package, and restarts `village-web`,
+leaving `/etc/village.env` and `runs/` untouched. There is no `git pull` on the
+server: `bootstrap.sh` copies the tree with `--exclude .git`, so `/opt/village`
+is a plain directory rather than a checkout.
+
+If you only have SSH and the repo is public, fetch a fresh copy and re-run
+bootstrap, which is idempotent and keeps the existing `/etc/village.env`:
+
+```bash
+rm -rf /tmp/village && git clone https://github.com/<you>/ai-village.git /tmp/village
+bash /tmp/village/deploy/bootstrap.sh
+```
+
+While the repo is private a fresh droplet has no credentials for that clone, so
+the laptop path is the only one. The schema is `CREATE TABLE IF NOT EXISTS`, so
+old sessions keep replaying across updates either way.
 
 **Stopping a run.** The button in the UI now asks for the admin token from
 `/etc/village.env` (D28). From the shell: `systemctl stop village-session` — but
