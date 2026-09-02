@@ -39,6 +39,8 @@
   .sys { color:var(--dim); }
   .human { color:#bb9af7; }
   .chat { white-space:pre-wrap; }
+  .ts { color:var(--dim); font-size:11px; font-variant-numeric:tabular-nums;
+        margin-right:6px; }
   footer { display:flex; gap:8px; padding:8px; border-top:1px solid var(--line); }
   footer input { flex:1; }
   @media (max-width:900px) { main { grid-template-columns:1fr; height:auto; } }
@@ -92,10 +94,23 @@ function agentColumn(name) {
   return cols[name];
 }
 
-function push(feed, kind, text) {
+// Local time, fixed width. The event's own ts, not now: a reloaded page must show
+// when a thing happened, not when the browser drew it.
+function stamp(ts) {
+  const d = new Date((ts || Date.now() / 1000) * 1000);
+  const hms = [d.getHours(), d.getMinutes(), d.getSeconds()]
+    .map(n => String(n).padStart(2, '0')).join(':');
+  const span = el('span', 'ts', hms);
+  span.title = d.toLocaleString();
+  return span;
+}
+
+function push(feed, kind, text, ts) {
   if (!feed) return;
   const wrap = el('div', 'e');
-  wrap.append(el('div', 'kind', kind));
+  const head = el('div', 'kind');
+  head.append(stamp(ts), document.createTextNode(kind));
+  wrap.append(head);
   // textContent, never innerHTML: a villager can emit anything, including a <script> tag.
   wrap.append(el('div', kind, text));
   feed.append(wrap);
@@ -106,7 +121,7 @@ function push(feed, kind, text) {
 function render(e) {
   const p = e.payload, who = e.agent;
 
-  if (e.type === 'chat') { chatLine(who, p.message || '', 'who'); return; }
+  if (e.type === 'chat') { chatLine(who, p.message || '', 'who', e.ts); return; }
 
   if (e.type === 'system') {
     if (p.kind === 'session_start') {
@@ -116,15 +131,17 @@ function render(e) {
       });
       return;
     }
-    if (p.kind === 'human_message') { chatLine('a human watching', p.message || '', 'human'); return; }
+    if (p.kind === 'human_message') { chatLine('a human watching', p.message || '', 'human', e.ts); return; }
     if (p.kind === 'session_end') {
-      chatLine('session', 'ended: ' + (p.reason || ''), 'sys');
+      chatLine('session', 'ended: ' + (p.reason || ''), 'sys', e.ts);
       Object.values(cols).forEach(c => { c.status.textContent = c.model || ''; });
       return;
     }
-    if (p.kind === 'turn_end' && who) { push(cols[who] ? cols[who].feed : null, 'sys', 'turn: ' + (p.summary || '')); return; }
-    if (who) { push(agentColumn(who).feed, 'sys', p.text || p.kind || ''); return; }
-    chatLine('session', p.text || p.kind || '', 'sys');
+    if (p.kind === 'turn_end' && who) {
+      push(cols[who] ? cols[who].feed : null, 'sys', 'turn: ' + (p.summary || ''), e.ts); return;
+    }
+    if (who) { push(agentColumn(who).feed, 'sys', p.text || p.kind || '', e.ts); return; }
+    chatLine('session', p.text || p.kind || '', 'sys', e.ts);
     return;
   }
 
@@ -134,12 +151,13 @@ function render(e) {
     Object.entries(cols).forEach(([n, c]) => {
       c.status.textContent = n === who ? 'acting' : (c.model || '');
     });
-    if (p.text) push(col.feed, 'thought', p.text);
+    if (p.text) push(col.feed, 'thought', p.text, e.ts);
   }
-  else if (e.type === 'compaction') push(col.feed, 'compaction', p.text || '');
-  else if (e.type === 'action') push(col.feed, 'action', p.name + ' ' + summarise(p.arguments));
+  else if (e.type === 'compaction') push(col.feed, 'compaction', p.text || '', e.ts);
+  else if (e.type === 'action') push(col.feed, 'action', p.name + ' ' + summarise(p.arguments), e.ts);
   // end_turn's result is redundant: the turn_end system event already says it
-  else if (e.type === 'result' && p.name !== 'end_turn') push(col.feed, 'result', (p.text || '').slice(0, 600));
+  else if (e.type === 'result' && p.name !== 'end_turn')
+    push(col.feed, 'result', (p.text || '').slice(0, 600), e.ts);
 }
 
 function summarise(args) {
@@ -148,9 +166,10 @@ function summarise(args) {
   return String(s).slice(0, 120);
 }
 
-function chatLine(who, text, cls) {
+function chatLine(who, text, cls, ts) {
   const c = document.getElementById('chat');
   const wrap = el('div', 'e');
+  wrap.append(stamp(ts));
   wrap.append(el('span', cls, who + ': '));
   wrap.append(el('span', 'chat', text));
   c.append(wrap); c.scrollTop = c.scrollHeight;

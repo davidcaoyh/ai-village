@@ -82,7 +82,7 @@ run it. Every safety property in this system follows from that one fact.
 |---|---|---|---|
 | `config.py` | YAML + `.env` → typed dataclasses | Validates configuration once, at startup | So every other module receives a checked object and never reaches for `os.environ` itself. A typo'd tool name stops the process at second zero with the list of valid names, instead of surfacing at turn 40 as an agent burning budget on `no tool named web_serach`. |
 | `llm.py` | HTTP client for one chat completion | The **only** module that knows a provider exists | Swapping OpenRouter for native SDKs becomes a one-file change. Cost counting lives here, next to the call that spends the money. Also draws the line the rest of the system depends on: a *transport* failure (429, 502) is retried; a *model mistake* (malformed tool JSON) is handed upward as `parse_error`, never retried. |
-| `tools.py` | Registry of 7 tools: schema + implementation | The **only** module that can affect the world | Every safety rail is enforced here, not requested in a prompt. `execute()` never raises - a failure returns an observation the agent can act on. One registry keeps each tool's schema (which the model reads) next to its code (which you run), so they cannot drift. |
+| `tools.py` | Registry of 8 tools: schema + implementation | The **only** module that can affect the world | Every safety rail is enforced here, not requested in a prompt. `execute()` never raises - a failure returns an observation the agent can act on. One registry keeps each tool's schema (which the model reads) next to its code (which you run), so they cannot drift. |
 | `agent.py` | One villager's turn: the ReAct loop | build prompt → call → execute → observe → repeat until `end_turn` | `take_turn()` is ~70 lines of code, and it is the thing the whole project exists to demonstrate. Bounded by `max_steps=6` so one confused villager cannot eat the session budget. |
 | `memory.py` | Prompt assembly + compaction | Decides what an agent knows when it wakes up | Context does not grow, but history does. A prompt is four bounded parts: persona+goal, compacted notes, last N events, tool schemas. Also the single place that decides what history *looks like* to a model - the first place to tune when behaviour disappoints. |
 | `store.py` | SQLite wrapper over one `events` table | The single source of truth for all state | UI, replay, cost, and debugging are all *queries* over this table, so nothing can drift out of sync. `recent_for_prompt()` enforces the visibility rule in SQL, not in Python, so no caller can forget it. |
@@ -399,7 +399,7 @@ scripts/  ->  village/  ->  store.py  <-  server/  ->  web/
 | Bounded memory across a long run | `store.notes_for` + the `compaction` event (D31) |
 | Multi-agent coordination | `village/orchestrator.py` + `send_chat` |
 | Observability / event sourcing | `village/store.py` |
-| Prompt injection & sandboxing | `fetch_url` envelope, `write_file` path check |
+| Prompt injection & sandboxing | `fetch_url` and `read_file` envelopes, `_safe_path` on both file tools (D34) |
 | Cost engineering | `village/llm.py` `SpendGuard`, decisions D9-D11 |
 | Web layer & real-time | `server/main.py`, `web/index.html` |
 | Testing an agent system | `village/fake.py` + `tests/` |

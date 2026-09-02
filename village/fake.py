@@ -11,8 +11,10 @@ paying for a session per CSS change.
 
 What it deliberately does NOT do: call `web_search` or `fetch_url`. A fake model
 driving real network tools would make an offline run depend on the network,
-which defeats the purpose. So the offline cast writes, talks, and remembers -
-enough to exercise every code path that is not the provider itself.
+which defeats the purpose. So the offline cast writes, reads, talks, and
+remembers - enough to exercise every code path that is not the provider itself.
+`read_file` is local, so it is in the rotation: the read-before-overwrite path is
+the one an offline transcript is most useful for checking.
 
 This is a test double promoted to a first-class module (D27). The alternative -
 a `if FAKE_MODE:` branch inside llm.py - would put test-only code on the path
@@ -94,8 +96,11 @@ class ScriptedModel:
         if phase == 0 and "send_chat" in allowed:
             call = ("send_chat", {"message": self.rng.choice(_LINES)})
         elif phase == 1 and "write_note" in allowed:
-            if self.rng.random() < 0.25 and "write_file" in allowed:
+            roll = self.rng.random()
+            if roll < 0.25 and "write_file" in allowed:
                 call = ("write_file", {"path": "brief.md", "text": _BRIEF})
+            elif roll < 0.45 and "read_file" in allowed:
+                call = ("read_file", {"path": "brief.md"})
             else:
                 call = ("write_note", {"text": self.rng.choice(_NOTES)})
         else:

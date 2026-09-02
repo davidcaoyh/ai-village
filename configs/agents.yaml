@@ -4,7 +4,8 @@
 defaults:
   temperature: 0.7
   max_tokens: 900
-  tools: [send_chat, web_search, fetch_url, write_note, read_notes, write_file, end_turn]
+  tools: [send_chat, web_search, fetch_url, write_note, read_notes,
+          write_file, read_file, end_turn]
   # Villagers pick one action from a seven-tool menu. That is not reasoning-hard
   # work, and on one measured call 83% of the completion tokens went to hidden
   # reasoning before a twelve-word tool call. Effort stays low; see decisions D10.
