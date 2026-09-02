@@ -106,6 +106,40 @@ def test_permanent_error_fails_fast(monkeypatch):
     assert len(calls) == 1
 
 
+def test_in_flight_402_is_retried(monkeypatch):
+    """A 402 saying "retry once the in-flight requests settle" is transient, and
+    the status code alone cannot tell you that. Killed a live run on Sep 1."""
+    body = '{"error":{"code":402,"metadata":{"reason":"in_flight_budget_exhausted"}}}'
+    responses = [FakeResponse(402, text=body), FakeResponse(200, _success_payload())]
+    calls = []
+
+    def fake_post(*args, **kwargs):
+        calls.append(1)
+        return responses[len(calls) - 1]
+
+    monkeypatch.setattr("village.llm.requests.post", fake_post)
+    result = chat("some/model", [{"role": "user", "content": "hi"}],
+                  tools=[{"type": "function"}])
+
+    assert len(calls) == 2
+    assert result.tool_calls[0]["name"] == "web_search"
+
+
+def test_a_plain_402_still_fails_fast(monkeypatch):
+    calls = []
+
+    def fake_post(*args, **kwargs):
+        calls.append(1)
+        return FakeResponse(402, text='{"error":{"code":402,"message":"no credit"}}')
+
+    monkeypatch.setattr("village.llm.requests.post", fake_post)
+
+    with pytest.raises(LLMError):
+        chat("some/model", [{"role": "user", "content": "hi"}])
+
+    assert len(calls) == 1      # waiting does not add money to an empty account
+
+
 def test_malformed_tool_json_is_not_retried(monkeypatch):
     calls = []
 

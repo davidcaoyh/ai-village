@@ -18,7 +18,7 @@ import pytest
 
 from village.agent import Agent
 from village.config import SeasonConfig
-from village.llm import LLMResponse, SpendGuard
+from village.llm import LLMError, LLMResponse, SpendGuard
 from village.orchestrator import run_session
 from village.store import Store
 
@@ -161,6 +161,50 @@ def test_human_kill_switch_stops_before_next_turn(store, season):
     assert fake.i == 0                                       # never called the model
     end = [e for e in store.tail("s1") if e["payload"].get("kind") == "session_end"][0]
     assert end["payload"]["reason"] == "human_stop"
+
+
+def test_provider_failure_ends_the_turn_not_the_session(store, season):
+    """One 502 must not throw away a run that has already been paid for."""
+    def boom(*args, **kwargs):
+        raise LLMError("HTTP 502: bad gateway")
+
+    working = FakeModel([_resp("end_turn", {"summary": "fine"})])
+    agents = [_agent(boom, name="a"), _agent(working, name="b")]
+    run_session(agents, season, store, SpendGuard(1.0), "s1", max_turns=4, verbose=False)
+
+    kinds = [e["payload"].get("kind") for e in store.tail("s1")]
+    assert "provider_error" in kinds
+    end = [e for e in store.tail("s1") if e["payload"].get("kind") == "session_end"][0]
+    assert end["payload"]["reason"] == "turn_cap"      # b kept working, so the run stood
+
+
+def test_a_full_round_of_provider_failures_stops_the_session(store, season):
+    def boom(*args, **kwargs):
+        raise LLMError("HTTP 402: out of credit")
+
+    agents = [_agent(boom, name="a"), _agent(boom, name="b")]
+    run_session(agents, season, store, SpendGuard(1.0), "s1", max_turns=20, verbose=False)
+
+    end = [e for e in store.tail("s1") if e["payload"].get("kind") == "session_end"][0]
+    assert end["payload"]["reason"] == "provider_unavailable"
+    # stopped after one round, rather than spending 20 turns failing
+    assert len([e for e in store.tail("s1")
+                if e["payload"].get("kind") == "provider_error"]) == 2
+
+
+def test_an_unexpected_crash_is_not_recorded_as_turn_cap(store, season):
+    """The Sep 1 bug: `reason` was set before the try and never updated, so a
+    session that died on an unhandled exception logged a clean finish."""
+    def boom(*args, **kwargs):
+        raise RuntimeError("something nobody anticipated")
+
+    with pytest.raises(RuntimeError):
+        run_session([_agent(boom)], season, store, SpendGuard(1.0), "s1",
+                    max_turns=4, verbose=False)
+
+    end = [e for e in store.tail("s1") if e["payload"].get("kind") == "session_end"][0]
+    assert end["payload"]["reason"] == "crashed"
+    assert any(e["payload"].get("kind") == "crashed" for e in store.tail("s1"))
 
 
 def test_session_always_ends_with_session_end(store, season):

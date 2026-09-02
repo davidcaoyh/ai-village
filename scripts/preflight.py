@@ -63,11 +63,16 @@ def check_key() -> bool:
 
 
 def check_credits() -> bool:
-    """GET /key reports the account limit and how much of it is spent.
+    """GET /key reports the limit and usage of *this key*, not of the account.
 
-    Note what this does NOT protect you from: this is the *account* rail, the
-    same one you set in the dashboard. VILLAGE_MAX_USD is the *code* rail. Two
-    independent rails is the point - a bug here cannot disable the dashboard.
+    That distinction cost a live session on Sep 1, 2026: with no per-key limit
+    set, this check warned and passed while the balance was nearly empty, and the
+    run died at turn 10 on a 402. OpenRouter exposes no account-balance endpoint,
+    so a key with no limit is genuinely unknowable from here - say so rather than
+    imply the check covered it.
+
+    VILLAGE_MAX_USD is the code rail. A per-key limit is the provider rail, and
+    the point of two is that a bug in this repo cannot disable the other one.
     """
     try:
         r = requests.get(f"{_API}/key", headers=_headers(), timeout=_TIMEOUT)
@@ -79,16 +84,19 @@ def check_credits() -> bool:
         return False
 
     d = (r.json() or {}).get("data") or {}
-    limit, usage = d.get("limit"), d.get("usage")
+    limit, usage, remaining = d.get("limit"), d.get("usage"), d.get("limit_remaining")
     if limit is None:
-        _line(WARN, "account credit", f"no limit set (usage so far ${usage or 0:.4f}). "
-                                      "Set a hard cap in the OpenRouter dashboard.")
+        _line(WARN, "key credit", f"no per-key limit set (this key has spent "
+                                  f"${usage or 0:.4f}). Your balance cannot be read from "
+                                  "the API - check the dashboard, or set a per-key limit "
+                                  "so this becomes a real check. A 402 mid-session ends "
+                                  "the run at whatever turn it reaches.")
         return True
-    left = float(limit) - float(usage or 0)
+    left = float(remaining) if remaining is not None else float(limit) - float(usage or 0)
     if left <= 0.25:
-        _line(BAD, "account credit", f"${left:.2f} left - top up before running")
+        _line(BAD, "key credit", f"${left:.2f} left - top up before running")
         return False
-    _line(OK, "account credit", f"${left:.2f} left of ${float(limit):.2f}")
+    _line(OK, "key credit", f"${left:.2f} left of ${float(limit):.2f}")
     return True
 
 

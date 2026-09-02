@@ -26,6 +26,11 @@ _MAX_ATTEMPTS = 3
 _RETRYABLE = {429, 500, 502, 503, 504}         # 400/401/402/404 are permanent: your bug,
                                                # key, balance or model id. Waiting never
                                                # fixes any of those.
+# Except one. OpenRouter returns 402 both for "no credit" and for "this would
+# exceed your balance only because earlier requests are still in flight", and says
+# which in the body. Measured Sep 1, 2026: the second killed a live session at
+# turn 10. The status code alone is too coarse; the metadata carries the signal.
+_RETRY_HINTS = ("in_flight_budget_exhausted",)
 _SUMMARY_LIMIT = 2000                          # chars of reasoning summary kept in raw
 
 
@@ -78,7 +83,9 @@ def _post(payload: dict[str, Any]) -> dict[str, Any]:
                 return body
 
             detail = f"HTTP {response.status_code}: {response.text[:300]}"
-            if response.status_code not in _RETRYABLE:
+            transient = (response.status_code in _RETRYABLE
+                         or any(h in response.text for h in _RETRY_HINTS))
+            if not transient:
                 raise LLMError(detail)
             last_error = LLMError(detail)
 

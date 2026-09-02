@@ -44,6 +44,7 @@ def run_session(agents, season, store, spend_guard, session_id: str | None = Non
     })
 
     turns_taken = {a.name: 0 for a in agents}
+    failed_in_a_row = 0
     reason = "turn_cap"
     try:
         for turn in range(turns):
@@ -63,8 +64,16 @@ def run_session(agents, season, store, spend_guard, session_id: str | None = Non
             if memory.should_compact(turns_taken[agent.name], season.compaction_every_turns):
                 agent.compact(store, season, spend_guard, session_id)
 
-            agent.take_turn(store, season, spend_guard, session_id, runs_dir=runs_dir)
+            ctx = agent.take_turn(store, season, spend_guard, session_id, runs_dir=runs_dir)
             turns_taken[agent.name] += 1
+
+            # One villager failing to reach the provider is that villager's turn.
+            # A whole round of it is the provider, and burning the turn cap on
+            # failures that cost nothing still writes a log nobody can read.
+            failed_in_a_row = failed_in_a_row + 1 if ctx.provider_error else 0
+            if failed_in_a_row >= len(agents):
+                reason = "provider_unavailable"
+                break
 
             if season.seconds_between_turns:
                 time.sleep(season.seconds_between_turns)
@@ -73,6 +82,14 @@ def run_session(agents, season, store, spend_guard, session_id: str | None = Non
         store.append(session_id, None, "system", {"kind": "budget_exceeded", "text": str(exc)})
     except KeyboardInterrupt:
         reason = "interrupted"
+    except Exception as exc:                                   # noqa: BLE001
+        # Without this the finally below writes the initial "turn_cap" and a crash
+        # reads as a clean finish six weeks later. Re-raised so the exit code is
+        # still non-zero and systemd marks the unit failed.
+        reason = "crashed"
+        store.append(session_id, None, "system",
+                     {"kind": "crashed", "text": f"{type(exc).__name__}: {exc}"[:500]})
+        raise
     finally:
         store.append(session_id, None, "system", {
             "kind": "session_end",

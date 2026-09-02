@@ -68,20 +68,39 @@ python -m scripts.run_session --fake --turns 16 --delay 0
 uvicorn server.main:app --port 8000     # open http://localhost:8000
 ```
 
-**Expect:** 33 tests pass; the fake run prints 16 turns and ends with
+**Expect:** 38 tests pass; the fake run prints 16 turns and ends with
 `turn_cap`; the page shows four columns filling in, a rising cost pill, and a
 group chat. If any of that is wrong, fix it here — debugging it over SSH is
 strictly worse.
 
 ### Stage 1 — the box
 
-Rent the droplet with **Ubuntu 24.04** and your SSH key. Then:
+Rent the droplet with **Ubuntu 24.04** and your SSH key. `bootstrap.sh` works on
+any copy of the repo at `/tmp/village`; how it gets there depends on whether the
+repo is public yet.
+
+Public repo — clone on the box:
 
 ```bash
 ssh root@<ip>
 git clone https://github.com/<you>/ai-village.git /tmp/village
 bash /tmp/village/deploy/bootstrap.sh
 ```
+
+Private repo — a fresh droplet has no GitHub credentials, so copy it up instead.
+The alternative is a deploy key, which is more moving parts for the same result:
+
+```bash
+cd ~/Documents/ECE/"Zhijing Lab"/project
+rsync -az --exclude .git --exclude .venv --exclude _private --exclude .env \
+      --exclude runs --exclude .DS_Store --exclude .pytest_cache \
+      --exclude .ruff_cache --exclude '*.egg-info' \
+      ./ root@<ip>:/tmp/village/
+ssh root@<ip> 'bash /tmp/village/deploy/bootstrap.sh'
+```
+
+`--exclude .env` matters: `bootstrap.sh` excludes it too, but a key that never
+leaves the laptop cannot leak from the staging directory either.
 
 **Expect:** the script ends with a numbered "Remaining" list. It has created the
 `village` user, `/opt/village`, a venv, `/etc/village.env` with a generated
@@ -106,15 +125,31 @@ You do not need a domain. `<dashed-ip>.sslip.io` resolves to that IP and Caddy
 gets a real certificate for it, so `143-198-1-2.sslip.io` works today and a
 bought domain is a one-line change later.
 
+Get the IPv4 specifically. The droplet has both, and curl prefers IPv6 when it
+can, which hands you a `2604:...` address and an sslip name that IPv4-only
+networks cannot reach:
+
 ```bash
-cp /opt/village/deploy/Caddyfile /etc/caddy/Caddyfile   # put the name in first
-systemctl reload caddy
-curl -sI https://<your-name>/healthz | head -1
+curl -4 -s ifconfig.me; echo        # 143.198.1.2 -> 143-198-1-2.sslip.io
 ```
 
-**Expect:** `HTTP/2 200`. If Caddy cannot get a certificate, the answer is
-almost always DNS not having propagated yet — `dig +short <your-name>` should
-return your IP.
+Copy the template first, then put the name in `/etc/caddy/Caddyfile` rather than
+in `/opt/village/deploy/Caddyfile` - the app tree is replaced on every redeploy,
+`/etc` is not (same reason secrets live in `/etc/village.env`).
+
+```bash
+cp /opt/village/deploy/Caddyfile /etc/caddy/Caddyfile
+nano /etc/caddy/Caddyfile        # village.example.com -> 143-198-1-2.sslip.io
+systemctl reload caddy
+curl -s https://<your-name>/healthz
+```
+
+**Expect:** `{"ok":true,"sessions":0}` — which proves more than a status code
+does, since it means the app opened its database. Do not probe this with
+`curl -I`: that sends HEAD, and the routes are registered GET-only, so a working
+site answers `405 Method Not Allowed`. If Caddy cannot get a certificate you get
+a connection error rather than any status, and the answer is almost always DNS
+not having propagated yet — `dig +short <your-name>` should return your IP.
 
 Then check the one endpoint that is not public, from your own machine rather
 than from the box (D28):
@@ -131,8 +166,18 @@ runs, which looks like a pass and tests nothing.
 
 ### Stage 4 — preflight, before spending anything
 
+A shell does not get two things the units get for free. `scripts/` is not an
+installed package (`pyproject.toml` ships `village` and `server` only), so it
+imports from the project root and nowhere else; and the key lives in
+`/etc/village.env`, which systemd reads for the units and nothing reads for you.
+So: cd, source, run. Preflight writes no files, so root is fine here.
+
 ```bash
-sudo -u village /opt/village/.venv/bin/python -m scripts.preflight
+cd /opt/village
+set -a; . /etc/village.env; set +a
+
+.venv/bin/python -m scripts.preflight --dry     # free, skips the paid call
+.venv/bin/python -m scripts.preflight           # the full six, ~$0.001
 ```
 
 **Expect:** every line `ok`, and an estimated session cost. This makes one real
@@ -143,10 +188,34 @@ billed.
 
 ### Stage 5 — one supervised session
 
+Prove the box can run eight turns before paying for 120. The unit takes no
+`--turns` flag, so this one is by hand, **as `village` and never as root**: a
+session run as root leaves a root-owned `village.db` plus its `-wal` and `-shm`
+files in `runs/`, and the service then cannot write to its own database.
+
 ```bash
-systemctl start village-session
-journalctl -fu village-session
+cd /opt/village
+set -a; . /etc/village.env; set +a
+sudo -E -u village .venv/bin/python -m scripts.run_session --turns 8
 ```
+
+Then the real one, through systemd, which supplies the env itself:
+
+`--no-block` matters: the unit is `Type=oneshot`, so a plain `systemctl start`
+waits for the whole session to finish while printing nothing, because a unit's
+output goes to the journal and not to your terminal.
+
+```bash
+journalctl -fu village-session               # terminal 1, start this first
+
+systemctl start --no-block village-session   # terminal 2, 120 turns, $0.30-0.60
+free -m                                      # a few times during the run, for run-notes.md
+```
+
+systemd owns the process, so the run survives your SSH connection dropping.
+Ctrl-C in the journal window only stops watching; to end the run use the UI
+button (it stops at a turn boundary and writes `session_end`) or
+`systemctl stop village-session`.
 
 **Expect:** turn lines with a rising spend figure. Open the site in a browser
 while it runs: events should appear within a second or two. Then read the

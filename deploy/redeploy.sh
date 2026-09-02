@@ -5,7 +5,9 @@
 set -euo pipefail
 TARGET="${1:?usage: redeploy.sh user@host}"
 rsync -az --delete --exclude runs --exclude .venv --exclude .git --exclude _private \
-      --exclude .env ./ "$TARGET:/opt/village/"
+      --exclude .env --exclude __pycache__ --exclude '*.egg-info' \
+      --exclude .pytest_cache --exclude .ruff_cache --exclude .DS_Store \
+      ./ "$TARGET:/opt/village/"
 ssh "$TARGET" 'chown -R village:village /opt/village &&
                /opt/village/.venv/bin/pip install -q -e /opt/village &&
                systemctl restart village-web &&

@@ -40,8 +40,20 @@ class Agent:
         nudged = False
 
         for _ in range(max_steps):
-            response = self.chat_fn(self.model, messages, schemas,
-                                    self.temperature, self.max_tokens, self.reasoning)
+            try:
+                response = self.chat_fn(self.model, messages, schemas,
+                                        self.temperature, self.max_tokens, self.reasoning)
+            except LLMError as exc:
+                # The provider is the one thing a villager cannot route around, and
+                # this is the only call in the turn that spends money. D13 keeps a
+                # tool failure from killing a paid run; the same has to hold here,
+                # or one 502 at turn 100 throws the whole session away.
+                store.append(session_id, self.name, "system",
+                             {"kind": "provider_error", "text": str(exc)[:500]})
+                ctx.provider_error = str(exc)[:500]
+                ctx.turn_over = True
+                return ctx
+
             spend_guard.add(response.usd, self.model)
             store.append(session_id, self.name, "thought", {
                 "text": response.text,

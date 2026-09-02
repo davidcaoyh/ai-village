@@ -43,6 +43,7 @@ class ToolContext:
     store: Any = None
     turn_over: bool = False
     turn_summary: str = ""
+    provider_error: str = ""     # written by the turn loop, not by a tool
 
     @property
     def artifacts_dir(self) -> Path:

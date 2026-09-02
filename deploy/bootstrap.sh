@@ -22,7 +22,12 @@ fi
 
 id village >/dev/null 2>&1 || useradd --system --home "$APP" --shell /usr/sbin/nologin village
 mkdir -p "$APP/runs"
+# .env is excluded on purpose. It is never in git, so a cloned $SRC cannot carry
+# it - but a $SRC copied up with rsync can, and secrets belong only in
+# /etc/village.env at mode 600, not in a directory the app user can read.
 rsync -a --delete --exclude runs --exclude .venv --exclude .git --exclude _private \
+      --exclude .env --exclude __pycache__ --exclude '*.egg-info' \
+      --exclude .pytest_cache --exclude .ruff_cache --exclude .DS_Store \
       "$SRC"/ "$APP"/
 
 python3 -m venv "$APP/.venv"
