@@ -58,7 +58,7 @@ orchestrator: it is claude's turn
   -> memory.build_context()   assembles 2 messages:
                                 system: persona + season goal + rules + notes
                                 user:   last 30 public events, rendered as prose
-  -> llm.chat()               POST to OpenRouter with those messages + 7 tool schemas
+  -> llm.chat()               POST to OpenRouter with those messages + 9 tool schemas
                               model replies: tool_call web_search({"query": "..."})
   -> store.append()           (claude, thought)  - tokens, cost, finish_reason
   -> store.append()           (claude, action)   - tool name + identifying args
@@ -82,7 +82,7 @@ run it. Every safety property in this system follows from that one fact.
 |---|---|---|---|
 | `config.py` | YAML + `.env` → typed dataclasses | Validates configuration once, at startup | So every other module receives a checked object and never reaches for `os.environ` itself. A typo'd tool name stops the process at second zero with the list of valid names, instead of surfacing at turn 40 as an agent burning budget on `no tool named web_serach`. |
 | `llm.py` | HTTP client for one chat completion | The **only** module that knows a provider exists | Swapping OpenRouter for native SDKs becomes a one-file change. Cost counting lives here, next to the call that spends the money. Also draws the line the rest of the system depends on: a *transport* failure (429, 502) is retried; a *model mistake* (malformed tool JSON) is handed upward as `parse_error`, never retried. |
-| `tools.py` | Registry of 8 tools: schema + implementation | The **only** module that can affect the world | Every safety rail is enforced here, not requested in a prompt. `execute()` never raises - a failure returns an observation the agent can act on. One registry keeps each tool's schema (which the model reads) next to its code (which you run), so they cannot drift. |
+| `tools.py` | Registry of 10 tools: schema + implementation | The **only** module that can affect the world | Every safety rail is enforced here, not requested in a prompt. `execute()` never raises - a failure returns an observation the agent can act on. One registry keeps each tool's schema (which the model reads) next to its code (which you run), so they cannot drift. |
 | `agent.py` | One villager's turn: the ReAct loop | build prompt → call → execute → observe → repeat until `end_turn` | `take_turn()` is ~70 lines of code, and it is the thing the whole project exists to demonstrate. Bounded by `max_steps=6` so one confused villager cannot eat the session budget. |
 | `memory.py` | Prompt assembly + compaction | Decides what an agent knows when it wakes up | Context does not grow, but history does. A prompt is four bounded parts: persona+goal, compacted notes, last N events, tool schemas. Also the single place that decides what history *looks like* to a model - the first place to tune when behaviour disappoints. |
 | `store.py` | SQLite wrapper over one `events` table | The single source of truth for all state | UI, replay, cost, and debugging are all *queries* over this table, so nothing can drift out of sync. `recent_for_prompt()` enforces the visibility rule in SQL, not in Python, so no caller can forget it. |
@@ -101,7 +101,7 @@ arrangement.
 | `server/main.py` | ~140-line FastAPI app | Reads the log, pushes it to browsers | Deliberately thin. If you feel tempted to *compute* something here that the orchestrator also computes, the value belongs in an event instead. |
 | `web/index.html` | One file: HTML + CSS + vanilla JS | The spectator page | A log viewer with a WebSocket and `appendChild`. A build step and a framework would buy nothing. Agent output is inserted with `textContent`, never `innerHTML` - a villager could emit `<script>`. |
 
-Seven routes, and it is worth knowing why each exists:
+Eight routes, and it is worth knowing why each exists:
 
 | Route | Direction | Purpose |
 |---|---|---|
@@ -109,6 +109,7 @@ Seven routes, and it is worth knowing why each exists:
 | `GET /healthz` | read | one cheap query, so a monitor can tell "process up" from "database gone" |
 | `GET /api/sessions` | read | list runs, so the page can default to the newest |
 | `GET /api/events` | read | full replay of one session; also the page's initial load |
+| `GET /api/artifact` | read | the file the village wrote, so a visitor can read the product and not only the process |
 | `WS /ws` | read (push) | live tail; client sends its highest seen id so a reconnect resumes rather than replaying |
 | `POST /api/message` | write | a spectator speaks into the group chat, once per 20s |
 | `POST /api/stop` | write | the kill switch; requires `X-Village-Token` once set |
@@ -125,7 +126,7 @@ agent, because the log must never blur what a model said with what a person said
 | `scripts/preflight.py` | check the provider before spending | A bad model id, an empty balance, and a model that answers with prose all look identical from inside the loop: a villager that talks and never acts. Each costs a whole session to notice. Preflight makes one real ~$0.0002 tool call per model, because catalogue metadata is a claim and a tool call is proof. |
 | `scripts/replay.py` | print a past session | Twelve lines, because the event log did the work. Every feature that reads history is a query, not a subsystem. |
 | `scripts/dev.sh` | one-word wrappers | The commands you run fifty times a day should be one word. |
-| `tests/` | 38 offline tests | A test suite that needs an API key is one you stop running. The loop is driven through an injected `chat_fn`, which is the same seam `--fake` uses. |
+| `tests/` | 52 offline tests | A test suite that needs an API key is one you stop running. The loop is driven through an injected `chat_fn`, which is the same seam `--fake` uses. |
 | `configs/*.yaml` | the cast and the goal, as data | Adding a fifth villager or running bigger models is a config edit. It also makes runs *comparable* - one thing changes at a time, which is the difference between an experiment and an anecdote. |
 | `deploy/` | systemd units, Caddyfile, bootstrap | See §6. |
 
@@ -264,7 +265,7 @@ choice for a 120-turn session, which is what the Tavily path is for.
 
 | Tool | Role | Why |
 |---|---|---|
-| **pytest** | test runner | Plain functions and `assert`; fixtures give each test its own temp database. 38 tests, no network, ~1s. |
+| **pytest** | test runner | Plain functions and `assert`; fixtures give each test its own temp database. 52 tests, no network, ~1s. |
 | **ruff** | linter | One fast binary replacing flake8+isort+pyupgrade. Configured to `E, F, I, UP` only - deliberately not the opinionated refactor rules, because this repo is read as an explanation and a linter that rewrites a clear line into a clever one works against that. |
 | **uv** | venv + installer | A much faster `pip`/`venv`. Nothing depends on it; `python -m venv` and `pip` work identically. |
 | **setuptools** | build backend | Makes `pip install -e .` work, which is what puts `village/` and `server/` on the import path so `from village.store import Store` resolves from any directory. `[tool.setuptools] packages = ["village", "server"]` is required because `configs/`, `runs/` and `web/` sit next to the code and setuptools refuses to guess which are Python packages. |
@@ -399,7 +400,7 @@ scripts/  ->  village/  ->  store.py  <-  server/  ->  web/
 | Bounded memory across a long run | `store.notes_for` + the `compaction` event (D31) |
 | Multi-agent coordination | `village/orchestrator.py` + `send_chat` |
 | Observability / event sourcing | `village/store.py` |
-| Prompt injection & sandboxing | `fetch_url` and `read_file` envelopes, `_safe_path` on both file tools (D34) |
+| Prompt injection & sandboxing | `fetch_url` envelope, `write_file` path check |
 | Cost engineering | `village/llm.py` `SpendGuard`, decisions D9-D11 |
 | Web layer & real-time | `server/main.py`, `web/index.html` |
 | Testing an agent system | `village/fake.py` + `tests/` |

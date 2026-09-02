@@ -25,6 +25,9 @@ from village.store import Store
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 DB_PATH = os.environ.get("VILLAGE_DB_PATH", "runs/village.db")
+# Artifacts sit beside the database: runs/<session>/artifacts/. Derived rather
+# than configured separately, so the two can never point at different runs.
+RUNS_DIR = Path(os.environ.get("VILLAGE_RUNS_DIR", str(Path(DB_PATH).parent)))
 ADMIN_TOKEN = os.environ.get("VILLAGE_ADMIN_TOKEN", "")
 MESSAGE_COOLDOWN = 20        # seconds between spectator messages, per session
 POLL_SECONDS = 0.7           # two processes, one file: polling an indexed read is
@@ -77,6 +80,24 @@ def events(session: str | None = None, after_id: int = 0, limit: int = 5000):
         "cost": store.session_cost(session),
         "stopped": store.stop_requested(session),
     }
+
+
+@app.get("/api/artifact")
+def artifact(session: str | None = None, path: str = "brief.md"):
+    """The thing the village is actually for.
+
+    Until this existed the site showed the work and hid the product: brief.md was
+    written 30 times in one session and no visitor could read a word of it.
+    """
+    session = _session_or_404(session)
+    # Same rule as tools._safe_path, restated rather than imported: a reader must
+    # not be able to reach outside the run it was asked about.
+    if not path or path.startswith("/") or ".." in Path(path).parts:
+        raise HTTPException(400, "path must be a simple relative filename")
+    target = RUNS_DIR / session / "artifacts" / path
+    exists = target.is_file()
+    return {"session": session, "path": path, "exists": exists,
+            "text": target.read_text() if exists else ""}
 
 
 @app.post("/api/message")

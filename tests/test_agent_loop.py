@@ -68,6 +68,13 @@ def _agent(fake, name="claude", tools=("send_chat", "write_note", "end_turn")):
                  tools=list(tools), chat_fn=fake)
 
 
+def _turn_end(store, session="s1"):
+    ends = [e["payload"] for e in store.tail(session)
+            if e["payload"].get("kind") == "turn_end"]
+    assert len(ends) == 1, f"expected exactly one turn_end, got {len(ends)}"
+    return ends[0]
+
+
 # --- the loop -------------------------------------------------------------
 
 def test_turn_runs_tools_then_ends(store, season):
@@ -116,7 +123,8 @@ def test_prose_without_tool_call_is_nudged_then_abandoned(store, season):
 
     assert ctx.turn_over
     assert fake.i == 2                         # nudged exactly once, then gave up
-    assert any(e["payload"].get("kind") == "no_tool_call" for e in store.tail("s1"))
+    end = _turn_end(store)
+    assert end["ended_by"] == "no_tool_call"
 
 
 def test_step_cap_bounds_a_looping_agent(store, season):
@@ -124,7 +132,7 @@ def test_step_cap_bounds_a_looping_agent(store, season):
     _agent(fake).take_turn(store, season, SpendGuard(1.0), "s1", max_steps=3)
 
     assert fake.i == 3
-    assert any(e["payload"].get("kind") == "step_cap_reached" for e in store.tail("s1"))
+    assert _turn_end(store)["ended_by"] == "step_cap"
 
 
 # --- the visibility rule --------------------------------------------------
@@ -161,6 +169,23 @@ def test_human_kill_switch_stops_before_next_turn(store, season):
     assert fake.i == 0                                       # never called the model
     end = [e for e in store.tail("s1") if e["payload"].get("kind") == "session_end"][0]
     assert end["payload"]["reason"] == "human_stop"
+
+
+def test_every_turn_writes_exactly_one_turn_end(store, season):
+    """Counting turns off end_turn undercuts badly: measured Sep 2, 2026, 29 of 72
+    live turns ended on the step cap or a nudge and emitted nothing."""
+    scripts = {
+        "ends":     [_resp("end_turn", {"summary": "done"})],
+        "loops":    [_resp("write_note", {"text": "again"})],          # never ends
+        "waffles":  [_resp(text="thinking out loud")],                 # never acts
+    }
+    agents = [_agent(FakeModel(v), name=k, tools=["write_note", "end_turn"])
+              for k, v in scripts.items()]
+    run_session(agents, season, store, SpendGuard(5.0), "s1", max_turns=3, verbose=False)
+
+    ends = [e["payload"] for e in store.tail("s1") if e["payload"].get("kind") == "turn_end"]
+    assert len(ends) == 3                                    # one per turn, no exceptions
+    assert {e["ended_by"] for e in ends} == {"end_turn", "step_cap", "no_tool_call"}
 
 
 def test_provider_failure_ends_the_turn_not_the_session(store, season):

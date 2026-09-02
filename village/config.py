@@ -33,6 +33,7 @@ class SeasonConfig:
     seconds_between_turns: float = 2
     context_window_events: int = 30
     compaction_every_turns: int = 20
+    max_steps_per_turn: int = 6
     constraints: list[str] = field(default_factory=list)
     title: str = ""
 
@@ -80,6 +81,7 @@ def load_season(path: str) -> SeasonConfig:
         seconds_between_turns=session.get("seconds_between_turns", 2),
         context_window_events=session.get("context_window_events", 30),
         compaction_every_turns=session.get("compaction_every_turns", 20),
+        max_steps_per_turn=session.get("max_steps_per_turn", 6),
     )
 
 

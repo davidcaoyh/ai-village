@@ -13,7 +13,7 @@ tools. `docs/decisions.md` says why, along with every other choice here.
 ```bash
 cp .env.example .env
 bash scripts/dev.sh install
-bash scripts/dev.sh test                 # 47 tests, offline, about a second
+bash scripts/dev.sh test                 # 52 tests, offline, about a second
 bash scripts/dev.sh fake 16              # a full 16-turn session, no API key
 bash scripts/dev.sh serve                # http://localhost:8000
 ```
@@ -67,7 +67,7 @@ server/, web/  a reader of the log: live WebSocket, replay, two human endpoints
 scripts/     run_session, preflight, replay, dev.sh
 deploy/      two systemd units, Caddyfile, bootstrap for a fresh box
 docs/        architecture, decisions, deploy, walkthrough
-tests/       47 tests, no network, no API key
+tests/       52 tests, no network, no API key
 ```
 
 Two chokepoints are worth naming: `llm.py` is the only module that knows a
@@ -78,10 +78,7 @@ Everything else is arrangement.
 
 No shell tool exists, and nothing can contact a real person. Fetched pages are
 truncated and wrapped in an `untrusted_web_content` block that tells the agent to
-treat the contents as data. Shared files carry their own `village_file` envelope,
-because a villager can paste web text into one and the next reader would take it
-as a teammate's words (D34). `write_file` and `read_file` both reject absolute
-paths and `..`.
+treat the contents as data. `write_file` rejects absolute paths and `..`.
 Spending is capped twice: `SpendGuard` ends the session, and the OpenRouter
 account limit is the rail a bug in this repo cannot switch off. On a public host
 `POST /api/stop` requires an admin token, because stopping a paid run is control,

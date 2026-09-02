@@ -31,6 +31,15 @@ class Agent:
     reasoning: dict | None = None
     others: list[str] = field(default_factory=list)
 
+    def _end(self, store, session_id: str, ctx, ended_by: str, summary: str):
+        """One turn, one turn_end. A turn that ran out of steps or never acted is
+        still a turn, and counting them off `end_turn` alone undercounts badly:
+        measured Sep 2, 2026, 29 of 72 turns ended without the agent calling it."""
+        ctx.turn_over = True
+        store.append(session_id, self.name, "system",
+                     {"kind": "turn_end", "ended_by": ended_by, "summary": summary})
+        return ctx
+
     def take_turn(self, store, season, spend_guard, session_id: str,
                   runs_dir: str = "runs", max_steps: int = 6) -> tools.ToolContext:
         ctx = tools.ToolContext(agent=self.name, runs_dir=runs_dir,
@@ -51,8 +60,8 @@ class Agent:
                 store.append(session_id, self.name, "system",
                              {"kind": "provider_error", "text": str(exc)[:500]})
                 ctx.provider_error = str(exc)[:500]
-                ctx.turn_over = True
-                return ctx
+                return self._end(store, session_id, ctx, "provider_error",
+                                 f"could not reach the provider: {str(exc)[:120]}")
 
             spend_guard.add(response.usd, self.model)
             store.append(session_id, self.name, "thought", {
@@ -68,11 +77,8 @@ class Agent:
                 # Prose with no tool call changes nothing. Nudge once, then stop:
                 # a villager that will not act should not consume the whole session.
                 if nudged:
-                    store.append(session_id, self.name, "system",
-                                 {"kind": "no_tool_call",
-                                  "text": f"{self.name} did not act after a nudge"})
-                    ctx.turn_over = True
-                    return ctx
+                    return self._end(store, session_id, ctx, "no_tool_call",
+                                     "wrote prose twice without calling a tool")
                 nudged = True
                 messages.append({"role": "assistant", "content": response.text or ""})
                 messages.append({"role": "user", "content":
@@ -88,13 +94,10 @@ class Agent:
                                  "content": observation})
 
             if ctx.turn_over:
-                return ctx
+                return self._end(store, session_id, ctx, "end_turn", ctx.turn_summary)
 
-        store.append(session_id, self.name, "system",
-                     {"kind": "step_cap_reached",
-                      "text": f"{self.name} used all {max_steps} steps without ending its turn"})
-        ctx.turn_over = True
-        return ctx
+        return self._end(store, session_id, ctx, "step_cap",
+                         f"used all {max_steps} steps without ending the turn")
 
     def compact(self, store, season, spend_guard, session_id: str) -> None:
         """Rewrite this agent's memory into one note that supersedes the rest.

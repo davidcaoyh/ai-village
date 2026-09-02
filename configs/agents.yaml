@@ -3,12 +3,17 @@
 
 defaults:
   temperature: 0.7
-  max_tokens: 900
-  tools: [send_chat, web_search, fetch_url, write_note, read_notes,
-          write_file, read_file, end_turn]
-  # Villagers pick one action from a seven-tool menu. That is not reasoning-hard
-  # work, and on one measured call 83% of the completion tokens went to hidden
-  # reasoning before a twelve-word tool call. Effort stays low; see decisions D10.
+  # 900 truncated every write mid-sentence: a 4,000-char brief is ~1,000 tokens,
+  # and 18 calls in the Sep 2 run came back at the ceiling. Sized for one section
+  # now that edit_file exists, with headroom for models that reason first.
+  max_tokens: 1600
+  # read_notes is deliberately absent: notes are already in the system prompt, so
+  # the tool spent 32 calls in the Sep 2 run re-reading what the agent could see.
+  tools: [send_chat, web_search, fetch_url, write_note,
+          list_files, read_file, write_file, edit_file, end_turn]
+  # Villagers pick one action from a menu. That is not reasoning-hard work, and on
+  # one measured call 83% of the completion tokens went to hidden reasoning before
+  # a twelve-word tool call. Effort stays low; see decisions D10.
   reasoning: {effort: low}
 
 agents:
@@ -26,6 +31,10 @@ agents:
 
   - name: gemini
     model: google/gemini-2.5-flash-lite
+    # 16 of 58 calls returned finish_reason=error with no tool call on Sep 2, and
+    # 59% of its completion tokens went to reasoning. It runs out of budget while
+    # thinking, so it gets more room than the rest of the cast.
+    max_tokens: 3000
     persona: >
       You are Gemini. You search widely and bring options back for the group to
       narrow down.

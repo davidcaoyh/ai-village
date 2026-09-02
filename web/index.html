@@ -41,6 +41,13 @@
   .chat { white-space:pre-wrap; }
   .ts { color:var(--dim); font-size:11px; font-variant-numeric:tabular-nums;
         margin-right:6px; }
+  .tabs { display:flex; gap:4px; }
+  .tabs button { background:none; border:1px solid transparent; color:var(--dim);
+                 font:inherit; font-size:13px; padding:1px 8px; border-radius:5px;
+                 cursor:pointer; }
+  .tabs button.on { color:var(--fg); border-color:var(--line); background:#1b1e2b; }
+  #brief { white-space:pre-wrap; font-size:13px; line-height:1.5; }
+  #briefmeta { color:var(--dim); font-weight:normal; }
   footer { display:flex; gap:8px; padding:8px; border-top:1px solid var(--line); }
   footer input { flex:1; }
   @media (max-width:900px) { main { grid-template-columns:1fr; height:auto; } }
@@ -60,8 +67,15 @@
   <div class="agents" id="left"></div>
 
   <div class="col">
-    <h2>group chat <span id="chatcount"></span></h2>
+    <h2>
+      <span class="tabs">
+        <button id="tabchat" class="on" onclick="tab('chat')">group chat</button>
+        <button id="tabbrief" onclick="tab('brief')">brief.md</button>
+      </span>
+      <span id="chatcount"></span><span id="briefmeta" hidden></span>
+    </h2>
     <div class="feed" id="chat"></div>
+    <div class="feed" id="brief" hidden></div>
     <footer>
       <input id="say" placeholder="say something to the village…" maxlength="500">
       <button onclick="send()">send</button>
@@ -154,10 +168,42 @@ function render(e) {
     if (p.text) push(col.feed, 'thought', p.text, e.ts);
   }
   else if (e.type === 'compaction') push(col.feed, 'compaction', p.text || '', e.ts);
-  else if (e.type === 'action') push(col.feed, 'action', p.name + ' ' + summarise(p.arguments), e.ts);
+  else if (e.type === 'action') {
+    push(col.feed, 'action', p.name + ' ' + summarise(p.arguments), e.ts);
+    if (p.name === 'write_file' || p.name === 'edit_file') {
+      briefSeen++;
+      if (!document.getElementById('brief').hidden) loadBrief();
+    }
+  }
   // end_turn's result is redundant: the turn_end system event already says it
   else if (e.type === 'result' && p.name !== 'end_turn')
     push(col.feed, 'result', (p.text || '').slice(0, 600), e.ts);
+}
+
+let briefSeen = 0;
+
+function tab(which) {
+  const chat = which === 'chat';
+  document.getElementById('chat').hidden = !chat;
+  document.getElementById('brief').hidden = chat;
+  document.getElementById('chatcount').hidden = !chat;
+  document.getElementById('briefmeta').hidden = chat;
+  document.getElementById('tabchat').classList.toggle('on', chat);
+  document.getElementById('tabbrief').classList.toggle('on', !chat);
+  if (!chat) loadBrief();
+}
+
+// Refetched rather than reconstructed from the log: the file on disk is the truth,
+// and rebuilding it from 30 overlapping writes would be a second source that drifts.
+async function loadBrief() {
+  const url = '/api/artifact' + (session ? '?session=' + encodeURIComponent(session) : '');
+  try {
+    const d = await (await fetch(url)).json();
+    const box = document.getElementById('brief');
+    box.textContent = d.exists ? d.text : 'the village has not written brief.md yet';
+    document.getElementById('briefmeta').textContent =
+      d.exists ? `${d.text.length} chars · ${briefSeen} edits` : '';
+  } catch (e) { /* a missing artifact is not an outage */ }
 }
 
 function summarise(args) {

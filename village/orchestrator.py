@@ -64,7 +64,8 @@ def run_session(agents, season, store, spend_guard, session_id: str | None = Non
             if memory.should_compact(turns_taken[agent.name], season.compaction_every_turns):
                 agent.compact(store, season, spend_guard, session_id)
 
-            ctx = agent.take_turn(store, season, spend_guard, session_id, runs_dir=runs_dir)
+            ctx = agent.take_turn(store, season, spend_guard, session_id,
+                                 runs_dir=runs_dir, max_steps=season.max_steps_per_turn)
             turns_taken[agent.name] += 1
 
             # One villager failing to reach the provider is that villager's turn.

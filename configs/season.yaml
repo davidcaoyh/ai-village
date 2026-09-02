@@ -3,12 +3,23 @@
 
 season_id: s01-causal-brief
 title: "Causal claim brief"
+# The section list is the coordination device. Without it every villager rewrote
+# the whole file from memory and clobbered the others: 30 whole-file writes in
+# the Sep 2 run, sizes swinging between 49 and 4,150 chars and never converging.
 goal: >
-  As a team, produce a short public brief answering a social-science causal
-  question of your choosing: does X cause Y? Cite sources, distinguish
-  correlation from causation, and flag confounders you cannot rule out.
-  Write the brief to brief.md with write_file. Read it back with read_file
-  before you change it, since write_file overwrites the whole file.
+  As a team, produce a short public brief in brief.md answering a social-science
+  causal question of your choosing: does X cause Y?
+
+  brief.md has exactly these sections, in this order:
+  "## Question", "## Answer", "## Evidence", "## Correlation vs causation",
+  "## Confounders we cannot rule out", "## Sources".
+
+  Claim a section in chat, then edit_file that one section. Read the file before
+  you touch it. Two villagers editing the same section overwrite each other, so
+  say which one you are taking.
+
+  Cite real sources with urls. Distinguish correlation from causation. Name the
+  confounders you cannot rule out rather than hiding them.
 constraints:
   - Do not try to contact real people.
   - Do not claim you have done something unless it is in the log.
@@ -16,4 +27,8 @@ session:
   turns_per_session: 120
   seconds_between_turns: 2
   context_window_events: 30
-  compaction_every_turns: 20
+  # 20 meant compaction never fired: 4 villagers over 120 turns is 30 turns each,
+  # and the Sep 2 run stopped at 18. At 8 every villager compacts three times.
+  compaction_every_turns: 8
+  # DeepSeek hit the 6-step cap on 18 of its turns. Research then write needs room.
+  max_steps_per_turn: 8

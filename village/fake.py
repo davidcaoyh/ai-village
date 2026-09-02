@@ -11,10 +11,8 @@ paying for a session per CSS change.
 
 What it deliberately does NOT do: call `web_search` or `fetch_url`. A fake model
 driving real network tools would make an offline run depend on the network,
-which defeats the purpose. So the offline cast writes, reads, talks, and
-remembers - enough to exercise every code path that is not the provider itself.
-`read_file` is local, so it is in the rotation: the read-before-overwrite path is
-the one an offline transcript is most useful for checking.
+which defeats the purpose. So the offline cast writes, talks, and remembers -
+enough to exercise every code path that is not the provider itself.
 
 This is a test double promoted to a first-class module (D27). The alternative -
 a `if FAKE_MODE:` branch inside llm.py - would put test-only code on the path
@@ -47,15 +45,16 @@ _NOTES = [
     "Agreed split: intro / evidence / confounders / limits.",
 ]
 
-_BRIEF = """# Does X cause Y? (offline demo artifact)
-
-Written by the fake cast so the pipeline can be demonstrated without an API key.
-A live run replaces this file with the village's actual brief.
-
-## Confounders we could not rule out
-- selection into the sample
-- measurement of the exposure
-"""
+# One section each, so an offline run exercises the same read -> edit -> hand over
+# path a live one uses, and ends with a real sectioned brief.md on disk.
+_SECTIONS = [
+    ("Question", "Does insufficient sleep cause reduced cognitive performance in adults?"),
+    ("Answer", "Yes for vigilance and working memory, on experimental evidence."),
+    ("Evidence", "Randomised restriction studies show dose-dependent decline."),
+    ("Correlation vs causation", "Survey correlations cannot separate cause from selection."),
+    ("Confounders we cannot rule out", "- selection into the sample\n- caffeine use"),
+    ("Sources", "- (offline demo: a live run cites real urls here)"),
+]
 
 
 _COMPACTED = (
@@ -92,17 +91,19 @@ class ScriptedModel:
         # Three model calls per turn: act, act, end. Bounded on purpose - an
         # agent that never calls end_turn is a real failure mode, and the fake
         # cast should not be the thing that exercises the step cap.
-        phase = n % 3
+        # chat, look, edit, hand over. Four calls per turn, bounded on purpose: an
+        # agent that never calls end_turn is a real failure mode, and the fake cast
+        # should not be the thing that exercises the step cap.
+        phase = n % 4
         if phase == 0 and "send_chat" in allowed:
             call = ("send_chat", {"message": self.rng.choice(_LINES)})
-        elif phase == 1 and "write_note" in allowed:
-            roll = self.rng.random()
-            if roll < 0.25 and "write_file" in allowed:
-                call = ("write_file", {"path": "brief.md", "text": _BRIEF})
-            elif roll < 0.45 and "read_file" in allowed:
-                call = ("read_file", {"path": "brief.md"})
-            else:
-                call = ("write_note", {"text": self.rng.choice(_NOTES)})
+        elif phase == 1 and "read_file" in allowed:
+            call = ("read_file", {"path": "brief.md"})
+        elif phase == 2 and "edit_file" in allowed:
+            heading, text = self.rng.choice(_SECTIONS)
+            call = ("edit_file", {"path": "brief.md", "section": heading, "text": text})
+        elif phase == 2 and "write_note" in allowed:
+            call = ("write_note", {"text": self.rng.choice(_NOTES)})
         else:
             call = ("end_turn", {"summary": f"{self.agent}: took one step toward the brief"})
 
