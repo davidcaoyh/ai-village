@@ -86,7 +86,7 @@ run it. Every safety property in this system follows from that one fact.
 | `agent.py` | One villager's turn: the ReAct loop | build prompt → call → execute → observe → repeat until `end_turn` | `take_turn()` is ~70 lines of code, and it is the thing the whole project exists to demonstrate. Bounded by `max_steps=6` so one confused villager cannot eat the session budget. |
 | `memory.py` | Prompt assembly + compaction | Decides what an agent knows when it wakes up | Context does not grow, but history does. A prompt is four bounded parts: persona+goal, compacted notes, last N events, tool schemas. Also the single place that decides what history *looks like* to a model - the first place to tune when behaviour disappoints. |
 | `store.py` | SQLite wrapper over one `events` table | The single source of truth for all state | UI, replay, cost, and debugging are all *queries* over this table, so nothing can drift out of sync. `recent_for_prompt()` enforces the visibility rule in SQL, not in Python, so no caller can forget it. |
-| `orchestrator.py` | The scheduler | Who acts, when, and when to stop | Round-robin turns, and four stop conditions all leaving through one `finally` that writes `session_end`. A session that merely stops emitting events is indistinguishable from a crash six weeks later. |
+| `orchestrator.py` | The scheduler | Who acts, when, and when to stop | Round-robin turns, and eight stop conditions all leaving through one `finally` that writes `session_end`. A session that merely stops emitting events is indistinguishable from a crash six weeks later. |
 | `prompts/*.md` | Prompt text as versioned files | Prompt surface | Prompts are the highest-leverage thing you will tune. `git log village/prompts/` should show exactly what changed on the run where behaviour improved. Not string literals buried in `.py`. |
 | `fake.py` | A scripted stand-in with `llm.chat`'s exact signature | Drives the whole pipeline offline | Lets you demo the UI, debug the log, and test the deploy with no key, no balance and no network. A test asserts the signature still matches, because the moment they drift an offline run stops proving anything about a live one. |
 
@@ -99,7 +99,7 @@ arrangement.
 | Component | What it is | Role | Why |
 |---|---|---|---|
 | `server/main.py` | ~140-line FastAPI app | Reads the log, pushes it to browsers | Deliberately thin. If you feel tempted to *compute* something here that the orchestrator also computes, the value belongs in an event instead. |
-| `web/index.html` | One file: HTML + CSS + vanilla JS | The spectator page | A log viewer with a WebSocket and `appendChild`. A build step and a framework would buy nothing. Agent output is inserted with `textContent`, never `innerHTML` - a villager could emit `<script>`. |
+| `web/index.html` | One file: HTML + CSS + vanilla JS | The spectator page | A log viewer with a WebSocket and `appendChild`. A build step and a framework would buy nothing. Agent output is inserted with `textContent`, never `innerHTML` - a villager could emit `<script>`. Every feed trims to `FEED_MAX` nodes, and the header's session picker turns the accumulated runs into an archive (D37). |
 
 Eight routes, and it is worth knowing why each exists:
 
@@ -107,7 +107,7 @@ Eight routes, and it is worth knowing why each exists:
 |---|---|---|
 | `GET /` | read | serves `web/index.html` |
 | `GET /healthz` | read | one cheap query, so a monitor can tell "process up" from "database gone" |
-| `GET /api/sessions` | read | list runs, so the page can default to the newest |
+| `GET /api/sessions` | read | list runs, newest first; the page defaults to the newest and fills its session picker from the rest |
 | `GET /api/events` | read | full replay of one session; also the page's initial load |
 | `GET /api/artifact` | read | the file the village wrote, so a visitor can read the product and not only the process |
 | `WS /ws` | read (push) | live tail; client sends its highest seen id so a reconnect resumes rather than replaying |

@@ -50,6 +50,10 @@
   #brief { white-space:pre-wrap; font-size:13px; line-height:1.5; }
   #briefmeta, #chatcount { color:var(--dim); font-weight:normal; overflow:hidden;
                text-overflow:ellipsis; min-width:0; }
+  #sessionpick { background:#1e222b; color:var(--text); border:1px solid var(--line);
+               border-radius:6px; font:inherit; font-size:13px; padding:5px 8px;
+               max-width:44ch; }
+  #status { color:var(--dim); }
   #briefpick, #briefsave { background:#1b1e2b; color:var(--fg);
                border:1px solid var(--line); border-radius:5px; font:inherit;
                font-size:12px; padding:1px 6px; }
@@ -62,7 +66,8 @@
 <body>
 <header>
   <b>AI VILLAGE</b>
-  <span id="session">connecting…</span>
+  <select id="sessionpick" title="pick a run" onchange="pickSession()"></select>
+  <span id="status">connecting…</span>
   <span id="turn"></span>
   <span id="cost"></span>
   <span class="sp"></span>
@@ -95,6 +100,7 @@
 
 <script>
 const cols = {};            // agent name -> {actions feed}
+const FEED_MAX = 200;       // a session is turn-capped, but a raised cap must not grow the dom forever
 let session = null, lastId = 0, turn = 0;
 
 function el(tag, cls, txt) {
@@ -137,7 +143,7 @@ function push(feed, kind, text, ts) {
   wrap.append(el('div', kind, text));
   feed.append(wrap);
   feed.scrollTop = feed.scrollHeight;
-  while (feed.children.length > 200) feed.firstChild.remove();
+  while (feed.children.length > FEED_MAX) feed.firstChild.remove();
 }
 
 function render(e) {
@@ -270,13 +276,14 @@ function chatLine(who, text, cls, ts) {
   wrap.append(el('span', cls, who + ': '));
   wrap.append(el('span', 'chat', text));
   c.append(wrap); c.scrollTop = c.scrollHeight;
+  while (c.children.length > FEED_MAX) c.firstChild.remove();
   document.getElementById('chatcount').textContent = c.children.length + ' messages';
 }
 
 function apply(data) {
   if (data.session && data.session !== session) {
     session = data.session;
-    document.getElementById('session').textContent = session;
+    document.getElementById('sessionpick').value = session;
   }
   if (data.cost !== undefined) document.getElementById('cost').textContent = '$' + data.cost.toFixed(4);
   if (data.stopped) document.getElementById('turn').textContent = 'stopped';
@@ -294,15 +301,49 @@ async function send() {
 }
 document.getElementById('say').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
 
+// A run is one session id, and each day's run is a new one. The picker is how
+// you reach yesterday's: the newest is the default, the rest are the archive.
+function pickSession() {
+  const id = document.getElementById('sessionpick').value;
+  if (id && id !== session) location.search = '?session=' + encodeURIComponent(id);
+}
+
+function label(s) {
+  const d = s.session_id.match(/^(\d{4})(\d\d)(\d\d)-(\d\d)(\d\d)/);
+  const when = d ? `${d[1]}-${d[2]}-${d[3]} ${d[4]}:${d[5]}` : s.session_id;
+  return `${when} · ${s.events} events`;
+}
+
+async function sessionList(current) {
+  const pick = document.getElementById('sessionpick');
+  let all = [];
+  try { all = await (await fetch('/api/sessions')).json(); } catch (_) {}
+  pick.replaceChildren();
+  if (!all.length) { pick.append(el('option', null, 'no runs yet')); return; }
+  all.forEach((s, i) => {
+    const o = el('option', null, (i === 0 ? '● ' : '') + label(s));
+    o.value = s.session_id;
+    pick.append(o);
+  });
+  if (current) pick.value = current;
+}
+
+let listed = false;
+
+// boot() also runs on every reconnect, so it asks for events after the last one
+// it already drew - refetching from zero would render the whole run twice.
 async function boot() {
-  const qs = new URLSearchParams(location.search);
-  const url = '/api/events' + (qs.get('session') ? '?session=' + qs.get('session') : '');
-  apply(await (await fetch(url)).json());
+  const want = session || new URLSearchParams(location.search).get('session');
+  const first = await (await fetch('/api/events?after_id=' + lastId +
+                       (want ? '&session=' + encodeURIComponent(want) : ''))).json();
+  if (!listed) { await sessionList(first.session); listed = true; }
+  apply(first);
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws?after_id=${lastId}` +
                            (session ? `&session=${session}` : ''));
   ws.onmessage = m => apply(JSON.parse(m.data));
-  ws.onclose = () => { document.getElementById('session').textContent = session + ' (disconnected)';
+  ws.onopen = () => { document.getElementById('status').textContent = ''; };
+  ws.onclose = () => { document.getElementById('status').textContent = '(disconnected)';
                        setTimeout(boot, 3000); };
 }
 boot();

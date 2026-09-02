@@ -73,6 +73,12 @@ uvicorn server.main:app --port 8000     # open http://localhost:8000
 group chat. If any of that is wrong, fix it here — debugging it over SSH is
 strictly worse.
 
+Run `--fake` twice and the header's session picker lists both, newest first and
+marked `●`. That is the archive: every run is its own `session_id`, the page
+shows one at a time, and picking an older one reloads at `?session=<id>`. Worth
+checking locally, because it is the difference between a site that shows three
+weeks of work and one that shows today.
+
 ### Stage 1 — the box
 
 Rent the droplet with **Ubuntu 24.04** and your SSH key. `bootstrap.sh` works on

@@ -43,8 +43,8 @@ themselves in parallel.
 | 3 | `village/store.py` | One append-only table. `recent_for_prompt()` is where the visibility rule lives. |
 | 4 | `village/memory.py` | How four bounded parts become a prompt. `_describe()` decides what history *looks like* to a model, and `build_compaction_messages()` is what keeps the notes part bounded. |
 | 5 | `village/agent.py` | **The loop.** ~70 lines. Everything else is arrangement around it. |
-| 6 | `village/orchestrator.py` | Round-robin, and the four ways a session can stop. |
-| 7 | `server/main.py` + `web/index.html` | Pure readers over the log. |
+| 6 | `village/orchestrator.py` | Round-robin, and the eight ways a session can stop. |
+| 7 | `server/main.py` + `web/index.html` | Pure readers over the log. The page shows one `session_id` at a time and reaches the others through the header picker, which is why daily runs accumulate as an archive rather than as one endless feed. |
 
 ---
 
