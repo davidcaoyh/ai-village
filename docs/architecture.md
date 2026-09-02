@@ -126,7 +126,7 @@ agent, because the log must never blur what a model said with what a person said
 | `scripts/preflight.py` | check the provider before spending | A bad model id, an empty balance, and a model that answers with prose all look identical from inside the loop: a villager that talks and never acts. Each costs a whole session to notice. Preflight makes one real ~$0.0002 tool call per model, because catalogue metadata is a claim and a tool call is proof. |
 | `scripts/replay.py` | print a past session | Twelve lines, because the event log did the work. Every feature that reads history is a query, not a subsystem. |
 | `scripts/dev.sh` | one-word wrappers | The commands you run fifty times a day should be one word. |
-| `tests/` | 52 offline tests | A test suite that needs an API key is one you stop running. The loop is driven through an injected `chat_fn`, which is the same seam `--fake` uses. |
+| `tests/` | 59 offline tests | A test suite that needs an API key is one you stop running. The loop is driven through an injected `chat_fn`, which is the same seam `--fake` uses. |
 | `configs/*.yaml` | the cast and the goal, as data | Adding a fifth villager or running bigger models is a config edit. It also makes runs *comparable* - one thing changes at a time, which is the difference between an experiment and an anecdote. |
 | `deploy/` | systemd units, Caddyfile, bootstrap | See §6. |
 
@@ -265,7 +265,7 @@ choice for a 120-turn session, which is what the Tavily path is for.
 
 | Tool | Role | Why |
 |---|---|---|
-| **pytest** | test runner | Plain functions and `assert`; fixtures give each test its own temp database. 52 tests, no network, ~1s. |
+| **pytest** | test runner | Plain functions and `assert`; fixtures give each test its own temp database. 59 tests, no network, ~1s. |
 | **ruff** | linter | One fast binary replacing flake8+isort+pyupgrade. Configured to `E, F, I, UP` only - deliberately not the opinionated refactor rules, because this repo is read as an explanation and a linter that rewrites a clear line into a clever one works against that. |
 | **uv** | venv + installer | A much faster `pip`/`venv`. Nothing depends on it; `python -m venv` and `pip` work identically. |
 | **setuptools** | build backend | Makes `pip install -e .` work, which is what puts `village/` and `server/` on the import path so `from village.store import Store` resolves from any directory. `[tool.setuptools] packages = ["village", "server"]` is required because `configs/`, `runs/` and `web/` sit next to the code and setuptools refuses to guess which are Python packages. |

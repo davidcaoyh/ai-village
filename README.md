@@ -13,7 +13,7 @@ tools. `docs/decisions.md` says why, along with every other choice here.
 ```bash
 cp .env.example .env
 bash scripts/dev.sh install
-bash scripts/dev.sh test                 # 52 tests, offline, about a second
+bash scripts/dev.sh test                 # 59 tests, offline, about a second
 bash scripts/dev.sh fake 16              # a full 16-turn session, no API key
 bash scripts/dev.sh serve                # http://localhost:8000
 ```
@@ -67,7 +67,7 @@ server/, web/  a reader of the log: live WebSocket, replay, two human endpoints
 scripts/     run_session, preflight, replay, dev.sh
 deploy/      two systemd units, Caddyfile, bootstrap for a fresh box
 docs/        architecture, decisions, deploy, walkthrough
-tests/       52 tests, no network, no API key
+tests/       59 tests, no network, no API key
 ```
 
 Two chokepoints are worth naming: `llm.py` is the only module that knows a

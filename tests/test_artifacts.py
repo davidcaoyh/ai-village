@@ -1,8 +1,11 @@
-"""The shared-file tools, and the route that finally lets a visitor read the result.
+"""Section editing, and the route that finally lets a visitor read the result.
 
-The Sep 2 run is why these exist: with write_file and no way to read it back, four
-models spent 15 of 34 chat messages asking each other to paste brief.md, and wrote
-the whole document 30 times, clobbering each other at sizes from 49 to 4,150 chars.
+`read_file` and `fetch_url` are specified in test_tools.py; this file covers the
+write half and the site.
+
+The Sep 2 run is why both exist. With write_file and no reader, four models spent 15 of
+34 chat messages asking each other to paste brief.md, and rewrote the whole
+document 30 times, clobbering each other at sizes from 49 to 4,150 chars.
 """
 
 from __future__ import annotations
@@ -24,17 +27,6 @@ def ctx(tmp_path):
 
 
 # --- reading -------------------------------------------------------------
-
-def test_read_file_says_what_does_exist_when_the_path_is_wrong(ctx):
-    execute("write_file", {"path": "brief.md", "text": "hi"}, ctx)
-    out = execute("read_file", {"path": "draft.md"}, ctx)
-    assert "does not exist" in out and "brief.md" in out    # points at the real name
-
-
-def test_read_file_returns_the_text(ctx):
-    execute("write_file", {"path": "brief.md", "text": SKELETON}, ctx)
-    assert "old evidence" in execute("read_file", {"path": "brief.md"}, ctx)
-
 
 def test_list_files_reports_an_empty_village(ctx):
     assert execute("list_files", {}, ctx) == "(no files yet)"
@@ -78,10 +70,9 @@ def test_section_matching_ignores_case_and_stray_hashes(ctx):
 
 
 @pytest.mark.parametrize("path", ["/etc/passwd", "../../secrets.txt", "a/../../b"])
-def test_the_new_tools_refuse_to_escape_the_run(ctx, path):
-    for name, args in (("read_file", {"path": path}),
-                       ("edit_file", {"path": path, "section": "s", "text": "t"})):
-        assert execute(name, {**args}, ctx).startswith("Error")
+def test_edit_file_refuses_to_escape_the_run(ctx, path):
+    out = execute("edit_file", {"path": path, "section": "s", "text": "t"}, ctx)
+    assert out.startswith("Error")
 
 
 # --- the route -----------------------------------------------------------
