@@ -10,6 +10,7 @@ you read the log six weeks later.
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from pathlib import Path
@@ -22,6 +23,55 @@ from .llm import BudgetExceeded
 # was four agents re-reading a finished brief and agreeing it was finished.
 IDLE_EXEMPT = ("send_chat", "read_file", "list_files", "read_notes",
                "end_turn", "vote_done")
+
+# The brief format is fixed by season.yaml, so the question is a heading, not a guess.
+QUESTION_RE = re.compile(r"^##\s+Question\s*$(.*?)(?=^##\s|\Z)", re.M | re.S)
+ANSWERED_LIMIT = 30       # this text lands in every villager's prompt on every call
+
+
+def past_questions(runs_dir: str, limit: int = ANSWERED_LIMIT) -> list[str]:
+    """Questions the briefs on disk already answer, newest run first.
+
+    Read off the filesystem, not the log. A session only sees its own artifacts
+    directory, so `list_files` cannot tell a villager what yesterday wrote, and
+    with a daily timer that is how the same question gets answered all week.
+
+    Bounded because every entry is prompt tokens paid on every model call.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    try:
+        dirs = sorted(Path(runs_dir).glob("*/artifacts"),
+                      key=lambda d: d.stat().st_mtime, reverse=True)
+    except OSError:
+        return out
+    for d in dirs:
+        for f in sorted(d.glob("*.md"), reverse=True):
+            try:
+                found = QUESTION_RE.search(f.read_text(errors="replace"))
+            except OSError:                 # a run being written to right now
+                continue
+            if not found:
+                continue                    # a brief that never got its heading
+            question = " ".join(found.group(1).split())
+            if question and question.lower() not in seen:
+                seen.add(question.lower())
+                out.append(question)
+                if len(out) >= limit:
+                    return out
+    return out
+
+
+def _goal_text(season, round_no: int, goals: list[str], runs_dir: str) -> str:
+    """The goal as the villagers see it, with {answered} filled from disk.
+
+    Recomputed on every round advance so the brief just finished is in the list
+    before anyone picks the next question.
+    """
+    asked = past_questions(runs_dir)
+    answered = "\n".join(f"  - {q}" for q in asked) if asked else "  (none yet)"
+    return (season.goal_for(round_no, goals[min(round_no - 1, len(goals) - 1)])
+            .replace("{answered}", answered))
 
 
 def new_session_id() -> str:
@@ -41,6 +91,17 @@ def run_session(agents, season, store, spend_guard, session_id: str | None = Non
         a.others = [n for n in names if n != a.name]
 
     turns = max_turns if max_turns is not None else season.turns_per_session
+
+    # Both read from the log, so a resumed session inherits which goal is in
+    # force and how idle the village already was.
+    goals = season.goals or [season.goal]
+    # Round 1 is the first goal. Each met goal starts the next round, and with
+    # repeat on the list wraps, so one goal text runs the whole session on a new
+    # file each time. Both derived from the log, so a resumed session lands right.
+    # Resolved before session_start so the logged goal is the one agents received.
+    round_no = store.goals_advanced(session_id) + 1
+    season.goal = _goal_text(season, round_no, goals, runs_dir)
+
     store.append(session_id, None, "system", {
         "kind": "session_start",
         "goal": season.goal,
@@ -48,19 +109,11 @@ def run_session(agents, season, store, spend_guard, session_id: str | None = Non
         "cast": [{"name": a.name, "model": a.model} for a in agents],
         "max_turns": turns,
         "max_usd": spend_guard.max_usd,
-        "goals": season.goals or [season.goal],
+        "goals": goals,
     })
 
     turns_taken = {a.name: 0 for a in agents}
     failed_in_a_row = 0
-    # Both read from the log, so a resumed session inherits which goal is in
-    # force and how idle the village already was.
-    goals = season.goals or [season.goal]
-    # Round 1 is the first goal. Each met goal starts the next round, and with
-    # repeat on the list wraps, so one goal text runs the whole session on a new
-    # file each time. Both derived from the log, so a resumed session lands right.
-    round_no = store.goals_advanced(session_id) + 1
-    season.goal = season.goal_for(round_no, goals[min(round_no - 1, len(goals) - 1)])
     last_action = store.newest_substantive_action(session_id, IDLE_EXEMPT)
     idle_turns = 0
     reason = "turn_cap"
@@ -99,8 +152,7 @@ def run_session(agents, season, store, spend_guard, session_id: str | None = Non
             if cast <= store.standing_votes(session_id):
                 if round_no < len(goals) or season.repeat:
                     round_no += 1
-                    season.goal = season.goal_for(
-                        round_no, goals[min(round_no - 1, len(goals) - 1)])
+                    season.goal = _goal_text(season, round_no, goals, runs_dir)
                     store.append(session_id, None, "system",
                                  {"kind": "goal_advanced", "index": round_no - 1,
                                   "round": round_no, "goal": season.goal,

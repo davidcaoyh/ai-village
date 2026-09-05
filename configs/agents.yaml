@@ -9,7 +9,7 @@ defaults:
   max_tokens: 1600
   # read_notes is deliberately absent: notes are already in the system prompt, so
   # the tool spent 32 calls in the Sep 2 run re-reading what the agent could see.
-  tools: [send_chat, web_search, fetch_url, write_note,
+  tools: [send_chat, web_search, fetch_url, resolve_doi, write_note,
           list_files, read_file, write_file, edit_file, vote_done, end_turn]
   # Villagers pick one action from a menu. That is not reasoning-hard work, and on
   # one measured call 83% of the completion tokens went to hidden reasoning before
@@ -17,10 +17,14 @@ defaults:
   reasoning: {effort: low}
 
 agents:
-  - name: claude
-    model: anthropic/claude-haiku-4.5
+  # Was anthropic/claude-haiku-4.5 until Sep 5. It cost $1.518 of the Sep 3 run's
+  # $1.6819 - 90% of the bill - while reading fewer tokens than deepseek, which
+  # cost $0.072. haiku lists at $1/$5 per M, glm-5.3-flash at $0.075/$0.25. The
+  # cast is data (D8), so the whole fix is these two lines.
+  - name: glm
+    model: z-ai/glm-5.3-flash
     persona: >
-      You are Claude. You verify before you assert, and you say plainly when you
+      You are GLM. You verify before you assert, and you say plainly when you
       are not sure.
 
   - name: gpt

@@ -92,3 +92,125 @@ def test_the_shipped_cast_can_read_as_well_as_write():
     for cfg in load_agents("configs/agents.yaml", valid_tools=tools.names()):
         assert "write_file" in cfg.tools
         assert "read_file" in cfg.tools, f"{cfg.name} can write files it cannot read back"
+
+
+# --- fetch failures: the Sep 2 run's 52 errors and 28 step-cap turns ------
+
+class _Resp:
+    def __init__(self, status=200, text="", payload=None):
+        self.status_code, self.text, self._payload = status, text, payload
+
+    def json(self):
+        return self._payload
+
+
+def _stub(monkeypatch, resp, calls):
+    def fake_get(url, **kw):
+        calls.append(url)
+        if isinstance(resp, Exception):
+            raise resp
+        return resp
+    monkeypatch.setattr(tools.requests, "get", fake_get)
+
+
+def test_a_403_tells_the_agent_what_to_do_instead(ctx, monkeypatch):
+    """The whole fix in one assertion: an observation with no next action is retried."""
+    _stub(monkeypatch, _Resp(403), calls := [])
+    out = _run("fetch_url", {"url": "https://www.sciencedirect.com/science/article/pii/X"}, ctx)
+
+    assert "HTTPError" not in out                 # not a stack trace
+    assert "Do not fetch this url again" in out
+    assert "web_search" in out                    # every branch names one next action
+    assert len(calls) == 1
+
+
+def test_a_403_on_a_doi_points_at_resolve_doi(ctx, monkeypatch):
+    _stub(monkeypatch, _Resp(403), [])
+    out = _run("fetch_url", {"url": "https://doi.org/10.1257/aer.91.4.795"}, ctx)
+
+    assert 'resolve_doi("10.1257/aer.91.4.795")' in out
+
+
+def test_a_404_says_the_url_was_probably_invented(ctx, monkeypatch):
+    _stub(monkeypatch, _Resp(404), [])
+    out = _run("fetch_url", {"url": "https://example.com/nope"}, ctx)
+
+    assert "written from memory" in out
+
+
+def test_the_same_dead_url_is_not_fetched_twice_in_a_turn(ctx, monkeypatch):
+    """D39. 19 of 28 step-cap turns were this loop. The executor decides, not the model."""
+    _stub(monkeypatch, _Resp(403), calls := [])
+    first = _run("fetch_url", {"url": "https://blocked.example/x"}, ctx)
+    second = _run("fetch_url", {"url": "https://blocked.example/x"}, ctx)
+
+    assert len(calls) == 1, "second attempt went to the network"
+    assert "You already tried this url this turn" in second
+    assert first in second                        # the advice is repeated, not dropped
+
+
+def test_a_timeout_is_named_and_not_retried(ctx, monkeypatch):
+    _stub(monkeypatch, TimeoutError("slow"), calls := [])
+    _run("fetch_url", {"url": "https://slow.example/x"}, ctx)
+    out = _run("fetch_url", {"url": "https://slow.example/x"}, ctx)
+
+    assert "TimeoutError" in out and len(calls) == 1
+
+
+def test_a_successful_fetch_is_not_remembered_as_a_failure(ctx, monkeypatch):
+    _stub(monkeypatch, _Resp(200, "<p>hello</p>"), calls := [])
+    _run("fetch_url", {"url": "https://ok.example/x"}, ctx)
+    _run("fetch_url", {"url": "https://ok.example/x"}, ctx)
+
+    assert len(calls) == 2 and ctx.failed_urls == {}
+
+
+# --- resolve_doi ----------------------------------------------------------
+
+_WORK = {
+    "display_name": "The Causal Effect of Education on Earnings",
+    "publication_year": 1999,
+    "authorships": [{"author": {"display_name": "David Card"}}],
+    "primary_location": {"source": {"display_name": "Handbook of Labor Economics"}},
+    "open_access": {"is_oa": False, "oa_status": "closed", "oa_url": None},
+    "best_oa_location": None,
+}
+
+
+def test_resolve_doi_returns_the_paper_and_admits_it_is_paywalled(ctx, monkeypatch):
+    _stub(monkeypatch, _Resp(200, payload=_WORK), [])
+    out = _run("resolve_doi", {"doi": "https://doi.org/10.1016/S1573-4463(99)03011-4"}, ctx)
+
+    assert "David Card (1999)" in out
+    assert "Handbook of Labor Economics" in out
+    assert "did not read the full text" in out    # the honest branch, for finding 1
+    assert "<doi_metadata" in out                 # provenance label, D34
+
+
+def test_resolve_doi_hands_over_a_pdf_when_one_exists(ctx, monkeypatch):
+    work = dict(_WORK, open_access={"is_oa": True, "oa_status": "green",
+                                    "oa_url": "https://x.org/p.pdf"},
+                best_oa_location={"pdf_url": "https://x.org/p.pdf"})
+    _stub(monkeypatch, _Resp(200, payload=work), [])
+    out = _run("resolve_doi", {"doi": "10.1016/S1573-4463(99)03011-4"}, ctx)
+
+    assert "https://x.org/p.pdf" in out
+    assert "fetch_url that url" in out            # verification becomes a real read
+
+
+def test_an_invented_doi_comes_back_unverified_not_as_an_error(ctx, monkeypatch):
+    """Finding 1: 26 of 37 cited urls were never fetched, most of them recalled dois."""
+    _stub(monkeypatch, _Resp(404), [])
+    out = _run("resolve_doi", {"doi": "10.9999/not-a-real-doi"}, ctx)
+
+    assert "unverified" in out and "do not put it in Sources" in out
+    assert "Error" not in out
+
+
+def test_resolve_doi_names_the_shape_it_wanted(ctx):
+    assert _run("resolve_doi", {"doi": "Card 1999"}, ctx).startswith("Error: that is not a doi")
+
+
+def test_the_shipped_cast_can_check_a_citation():
+    for cfg in load_agents("configs/agents.yaml", valid_tools=tools.names()):
+        assert "resolve_doi" in cfg.tools, f"{cfg.name} can cite dois it cannot verify"

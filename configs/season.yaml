@@ -16,9 +16,12 @@ goal: >
   Round {round}. As a team, produce a short public brief in {file} answering a
   social-science causal question of your choosing: does X cause Y?
 
-  It must be a question the village has not answered in an earlier round.
-  list_files shows what you have already written, and read_file shows what is
-  in them - check before you choose, and pick a different field if you can.
+  It must be a question no brief has answered before, in this session or in any
+  earlier one. These are already taken, so pick something else:
+
+  {answered}
+
+  read_file shows what is in a brief if you want to see how one was handled.
 
 constraints:
   - Do not try to contact real people.
@@ -31,6 +34,13 @@ constraints:
     other, so say which one you are taking.
   - Cite real sources with urls. Distinguish correlation from causation. Name
     the confounders you cannot rule out rather than hiding them.
+  - Choose a question from economics, education, labour, development or public
+    policy. Do not write about suicide, self-harm, mental-health treatment,
+    medical or clinical questions, or an active political controversy. If a
+    question would need a clinician or a lawyer to answer responsibly, pick a
+    different one.
+  - In Sources, list only urls fetch_url returned or resolve_doi confirmed this
+    session. Mark anything else "(unverified)".
 session:
   turns_per_session: 120
   seconds_between_turns: 2
