@@ -97,8 +97,9 @@ def test_the_shipped_cast_can_read_as_well_as_write():
 # --- fetch failures: the Sep 2 run's 52 errors and 28 step-cap turns ------
 
 class _Resp:
-    def __init__(self, status=200, text="", payload=None):
+    def __init__(self, status=200, text="", payload=None, content_type="text/html"):
         self.status_code, self.text, self._payload = status, text, payload
+        self.headers = {"Content-Type": content_type} if content_type is not None else {}
 
     def json(self):
         return self._payload
@@ -214,3 +215,68 @@ def test_resolve_doi_names_the_shape_it_wanted(ctx):
 def test_the_shipped_cast_can_check_a_citation():
     for cfg in load_agents("configs/agents.yaml", valid_tools=tools.names()):
         assert "resolve_doi" in cfg.tools, f"{cfg.name} can cite dois it cannot verify"
+
+
+# --- binary bodies: a 200 that is still unreadable (D43) -------------------
+
+def test_a_pdf_is_refused_instead_of_decoded_into_noise(ctx, monkeypatch):
+    """Seen Sep 5: results logged as "PDF binary stream data". Tokens, no information."""
+    _stub(monkeypatch, _Resp(200, "%PDF-1.7 \x00binary", content_type="application/pdf"), [])
+    out = _run("fetch_url", {"url": "https://example.org/paper.pdf"}, ctx)
+
+    assert "%PDF" not in out                       # the body never reaches the model
+    assert "application/pdf" in out
+    assert "resolve_doi" in out                    # the pdf-specific way out
+    assert "Do not fetch this url again" in out
+
+
+def test_a_refused_type_is_remembered_like_a_failure(ctx, monkeypatch):
+    """The content type will not change on a retry, so a repeat must cost no network."""
+    _stub(monkeypatch, _Resp(200, "binary", content_type="application/octet-stream"),
+          calls := [])
+    _run("fetch_url", {"url": "https://example.org/blob"}, ctx)
+    second = _run("fetch_url", {"url": "https://example.org/blob"}, ctx)
+
+    assert len(calls) == 1
+    assert "You already tried this url this turn" in second
+
+
+def test_html_and_json_still_read_normally(ctx, monkeypatch):
+    for content_type in ("text/html; charset=utf-8", "text/plain", "application/json"):
+        _stub(monkeypatch, _Resp(200, "<p>hello</p>", content_type=content_type), [])
+        fresh = tools.ToolContext(agent="claude", session_id="s1")
+        out = _run("fetch_url", {"url": "https://example.org/x"}, fresh)
+        assert "hello" in out, content_type
+        assert "<untrusted_web_content" in out, content_type
+
+
+def test_a_missing_content_type_is_not_treated_as_binary(ctx, monkeypatch):
+    """Some servers send no header. Refusing those would lose pages that read fine."""
+    _stub(monkeypatch, _Resp(200, "<p>hello</p>", content_type=None), [])
+    assert "hello" in _run("fetch_url", {"url": "https://example.org/x"}, ctx)
+
+
+# --- the ordering rule reaches the cast (issue 3) -------------------------
+
+def test_the_season_tells_whoever_creates_a_brief_to_seed_every_heading():
+    """_replace_section appends a heading it cannot find, so order breaks silently."""
+    from village.config import load_season
+
+    season = load_season("configs/season.yaml")
+    joined = " ".join(season.constraints)
+    assert "bodies empty" in joined
+    assert "out of sequence" in joined
+
+
+def test_a_doi_lifted_out_of_a_pdf_url_loses_the_extension(ctx, monkeypatch):
+    """A false "not registered" is the one wrong answer this tool must never give."""
+    seen = []
+
+    def fake_get(url, **kw):
+        seen.append(url)
+        return _Resp(200, payload=_WORK, content_type="application/json")
+
+    monkeypatch.setattr(tools.requests, "get", fake_get)
+    _run("resolve_doi", {"doi": "https://x.org/10.1257/aer.101.7.3078.pdf"}, ctx)
+
+    assert seen[0].endswith("10.1257/aer.101.7.3078")

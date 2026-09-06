@@ -1,21 +1,25 @@
-# The real AI Village sets a new goal every Monday. This does the same thing,
-# which is also what makes the site worth returning to: something happened
-# since last week.
+# Back-to-back sessions, so the site is live when someone opens it.
 #
-# Before enabling this, run one session by hand and read the transcript. An
-# unattended weekly job is a thing you turn on *after* you trust the run.
+# OnUnitInactiveSec, not OnCalendar: the service is Type=oneshot, and a calendar
+# timer would fire while a session was still running. This one starts counting when
+# the last run *finished*, so two sessions can never overlap.
+#
+# Before enabling this, run one session by hand and read the transcript, and set
+# VILLAGE_MAX_USD_PER_DAY - an unattended loop with only a per-session cap has no
+# ceiling on the day (D45).
 
 [Unit]
-Description=Weekly AI Village session
+Description=AI Village session, restarted after each one ends
 
 [Timer]
-OnCalendar=Mon 09:00
-# Fire on the next boot if the machine was down at 09:00, rather than skipping
-# a week silently.
+OnUnitInactiveSec=5min
+OnBootSec=2min
+# Missed while the machine was down: start once it is back rather than waiting out
+# the full interval.
 Persistent=true
 # Four villagers all starting on the same minute as everyone else's cron is how
 # you meet a provider rate limit. Spread it.
-RandomizedDelaySec=900
+RandomizedDelaySec=60
 
 [Install]
 WantedBy=timers.target

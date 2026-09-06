@@ -28,7 +28,10 @@ constraints:
   - Do not claim you have done something unless it is in the log.
   - 'Every brief has exactly these sections, in this order: "## Question",
     "## Answer", "## Evidence", "## Correlation vs causation",
-    "## Confounders we cannot rule out", "## Sources".'
+    "## Confounders we cannot rule out", "## Sources". Whoever creates the file
+    writes all six headings in that order first, with the bodies empty. edit_file
+    appends a section it cannot find, so a heading written out of sequence lands
+    at the bottom of the document and someone has to rewrite the whole file.'
   - Claim a section in chat, then edit_file that one section. Read the file
     before you touch it. Two villagers editing the same section overwrite each
     other, so say which one you are taking.

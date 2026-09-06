@@ -29,7 +29,14 @@ bash scripts/dev.sh preflight            # proves the key, the models and search
 bash scripts/dev.sh run --only claude --turns 4      # one villager, a few cents
 bash scripts/dev.sh run --turns 40                   # the whole cast
 bash scripts/dev.sh replay <session-id>
+bash scripts/dev.sh eval <session-id>                # per-agent scoreboard, or 'latest'
 ```
+
+`eval` is the answer to "which villager actually moved the goal forward". Every
+metric in it is a GROUP BY over the one `events` table - cost, tokens, actions,
+tool failure rate, malformed-call rate, how each turn ended, which tools each
+model reached for. Nothing was instrumented to produce it, which is the whole
+argument for the event log.
 
 Preflight makes one real tool-calling request per model, because a bad model id,
 an empty balance and a model that answers with prose all look identical from

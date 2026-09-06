@@ -123,6 +123,7 @@ agent, because the log must never blur what a model said with what a person said
 | Component | Role | Why |
 |---|---|---|
 | `scripts/run_session.py` | run one session | Entry points stay thin - parse args, load config, call `orchestrator.run_session`. Logic in an entry point is logic tests cannot reach. |
+| `scripts/eval.py` | per-agent scoreboard for one session | Every metric is a `GROUP BY` over `events`; none of them required new instrumentation, which is D4's invoice arriving. Cost and tokens from `thought`, what was attempted from `action`, what came back from `result`, how the turn ended from `system`. Reads the database directly rather than through `store.py`, so a scoreboard cannot accidentally write. |
 | `scripts/preflight.py` | check the provider before spending | A bad model id, an empty balance, and a model that answers with prose all look identical from inside the loop: a villager that talks and never acts. Each costs a whole session to notice. Preflight makes one real ~$0.0002 tool call per model, because catalogue metadata is a claim and a tool call is proof. |
 | `scripts/replay.py` | print a past session | Twelve lines, because the event log did the work. Every feature that reads history is a query, not a subsystem. |
 | `scripts/dev.sh` | one-word wrappers | The commands you run fifty times a day should be one word. |

@@ -1,8 +1,29 @@
-# Replace the name, then: sudo cp deploy/Caddyfile /etc/caddy/Caddyfile && sudo systemctl reload caddy
-# No domain yet? <dashed-ip>.sslip.io resolves to that IP and gets a real
-# certificate, e.g. 143-198-1-2.sslip.io
-village.example.com {
+# The village only. yuhaocao.com is served by GitHub Pages and never touches
+# this box, so a droplet restart cannot take the CV and the paper offline.
+#
+# install: sudo cp deploy/Caddyfile /etc/caddy/Caddyfile && sudo systemctl reload caddy
+#
+# village.yuhaocao.com must already resolve here before you reload: Caddy gets
+# its certificate over the HTTP challenge on :80, and a name that does not point
+# here yet fails that challenge and retries with a backoff.
+
+village.yuhaocao.com {
 	encode gzip
 	# Caddy proxies WebSockets with no extra directives, and renews TLS itself.
 	reverse_proxy 127.0.0.1:8000
 }
+
+# Fallback only. If GitHub Pages is not serving yuhaocao.com over HTTPS when you
+# need the link, point the four apex A records at this box and uncomment this;
+# put the site files in /opt/site first.
+# yuhaocao.com, www.yuhaocao.com {
+# 	encode gzip
+# 	root * /opt/site
+# 	file_server
+# }
+
+# The old sslip.io name stops serving once this file replaces the previous one.
+# Uncomment with the exact name you were using if anything already links to it.
+# 165-245-224-162.sslip.io {
+# 	redir https://village.yuhaocao.com{uri} permanent
+# }

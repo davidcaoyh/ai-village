@@ -166,6 +166,20 @@ class Store:
         ).fetchone()
         return round(float(r["c"] or 0.0), 6)
 
+    def spend_since(self, ts: float) -> float:
+        """Every session's spend since a timestamp, not just this one's.
+
+        `SpendGuard` is per session and in process, so a timer that starts a run every
+        few minutes gets a fresh cap each time and nothing watches the total. This is
+        the number that guard cannot see.
+        """
+        r = self.db.execute(
+            """SELECT COALESCE(SUM(json_extract(payload_json,'$.usd')),0) AS c
+               FROM events WHERE type='thought' AND ts >= ?""",
+            (ts,),
+        ).fetchone()
+        return round(float(r["c"] or 0.0), 6)
+
     def sessions(self, limit: int = 50) -> list[dict]:
         rows = self.db.execute(
             """SELECT session_id, MIN(ts) AS started, MAX(id) AS last_id, COUNT(*) AS events

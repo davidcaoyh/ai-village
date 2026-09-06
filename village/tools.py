@@ -35,6 +35,11 @@ FETCH_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+# fetch_url returns text, so a binary body decodes to noise the model still pays
+# for. resolve_doi now hands out open-access pdf urls, so this path got likelier. D43.
+READABLE_TYPES = ("application/json", "application/xml", "application/xhtml+xml",
+                  "application/rss+xml", "application/atom+xml")
+
 OPENALEX = "https://api.openalex.org/works/doi:"
 DOI_RE = re.compile(r"10\.\d{4,9}/[^\s\"'<>]+")
 
@@ -189,6 +194,25 @@ def _host(url: str) -> str:
     return urlparse(url).netloc or url
 
 
+def _doi_in(text: str) -> str | None:
+    """The doi in a string, without the page extension a url usually appends.
+
+    "10.1257/aer.101.7.3078.pdf" would 404 at the registry and be reported as an
+    invented citation, which is the one wrong answer resolve_doi must never give.
+    """
+    match = DOI_RE.search(text or "")
+    if match is None:
+        return None
+    return re.sub(r"\.(pdf|html?|xml)$", "", match.group(0).rstrip(".,;)"), flags=re.I)
+
+
+def _next_action(url: str) -> str:
+    """The one thing to try instead. Shared by every observation a failed fetch leaves."""
+    doi = _doi_in(url)
+    return (f'call resolve_doi("{doi}") to verify the citation'
+            if doi else "web_search for the same claim on another site")
+
+
 def _fetch_error(url: str, status: int | None, exc: Exception | None) -> str:
     """The observation a failed fetch leaves in the context window.
 
@@ -197,9 +221,7 @@ def _fetch_error(url: str, status: int | None, exc: Exception | None) -> str:
     retries the same url until the step cap ends the turn. Every branch here names a
     next action. D38.
     """
-    doi = DOI_RE.search(url)
-    instead = (f'call resolve_doi("{doi.group(0)}") to verify the citation'
-               if doi else "web_search for the same claim on another site")
+    instead = _next_action(url)
 
     if status in (401, 403, 429):
         why = f"{_host(url)} refuses automated readers ({status}). Retrying will not help."
@@ -241,6 +263,19 @@ def fetch_url(ctx: ToolContext, url: str) -> str:
         ctx.failed_urls[url] = _fetch_error(url, r.status_code, None)
         return ctx.failed_urls[url]
 
+    # A 200 carrying a pdf is still a dead end here, so it is recorded like a failure:
+    # the type will not change on a retry. No header means proceed - some servers
+    # send none, and refusing those would lose pages that read fine. D43.
+    kind = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+    if kind and not (kind.startswith("text/") or kind in READABLE_TYPES):
+        paper = ("resolve_doi gives you a paper's title, authors and year from the "
+                 "registry without reading the pdf. " if kind == "application/pdf" else "")
+        ctx.failed_urls[url] = (
+            f"That url served {kind}, and fetch_url reads text - a binary body comes back "
+            f"as noise you would still pay for. Do not fetch this url again. "
+            f"{paper}Instead: {_next_action(url)}.")
+        return ctx.failed_urls[url]
+
     text = _strip_tags(r.text)[:FETCH_LIMIT]
     # The wrapper is the prompt-injection defence. Everything inside it came from
     # the internet and may be written to look like an instruction to the agent.
@@ -261,11 +296,10 @@ def resolve_doi(ctx: ToolContext, doi: str) -> str:
     registry, which does not block, so the question the agent actually has ("is this
     paper real") is answerable even when the pdf is not. D40.
     """
-    match = DOI_RE.search(doi or "")
-    if match is None:
+    ident = _doi_in(doi)
+    if ident is None:
         return ("Error: that is not a doi. A doi looks like 10.1257/aer.91.4.795 and may "
                 "be given bare or as a https://doi.org/... url.")
-    ident = match.group(0).rstrip(".,;)")
 
     try:
         r = requests.get(OPENALEX + quote(ident, safe="/"), timeout=HTTP_TIMEOUT,

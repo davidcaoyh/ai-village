@@ -286,6 +286,36 @@ old sessions keep replaying across updates either way.
 prefer the button, because it stops at a turn boundary and writes a proper
 `session_end` event, and `systemctl stop` sends a signal mid-turn.
 
+## Backing the database up, and why `scp` alone is wrong
+
+The database is in WAL mode (D21), so recent commits live in `village.db-wal` until a
+checkpoint folds them into the main file. `village-web` holds a read connection open
+permanently, and a long-lived reader defers checkpointing - so the WAL can hold hours
+of events. **Copying `village.db` on its own gives you the last checkpoint, not the
+current state.** Measured Sep 6, 2026: an `scp` of the file alone was missing 148
+events of a 3,132-event session, including its `session_end`, so `scripts/eval.py`
+reported the finished run as still going with a cost of $0.
+
+Use SQLite's own backup, which is atomic and folds the WAL in:
+
+```bash
+ssh root@165.245.224.162 "sqlite3 /opt/village/runs/village.db \".backup '/tmp/v.db'\""
+scp root@165.245.224.162:/tmp/v.db ~/village-backup-$(date +%F).db
+ssh root@165.245.224.162 "rm /tmp/v.db"
+```
+
+Safe while a session is running. `VACUUM INTO '/tmp/v.db'` works too and compacts.
+Copying all three files (`village.db`, `-wal`, `-shm`) also works but only if nothing
+writes between the copies, which is not true during a run.
+
+Check what you got before trusting it:
+
+```bash
+bash scripts/dev.sh eval <session-id> --db ~/village-backup-$(date +%F).db
+```
+
+`ended` should name a stop reason. If it says `NO session_end`, the copy lost its tail.
+
 ## 5. What is deliberately not here
 
 - **No Docker.** One process and one file. A container adds a build step and a

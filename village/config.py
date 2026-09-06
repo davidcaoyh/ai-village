@@ -64,6 +64,7 @@ class Settings:
     db_path: str
     max_turns: int
     max_usd: float
+    max_usd_per_day: float
     admin_token: str
 
 
@@ -130,5 +131,7 @@ def load_settings(require_key: bool = True) -> Settings:
         db_path=os.environ.get("VILLAGE_DB_PATH", "runs/village.db"),
         max_turns=int(os.environ.get("VILLAGE_MAX_TURNS", "120")),
         max_usd=float(os.environ.get("VILLAGE_MAX_USD", "2.0")),
+        # 0 disables. Checked before a session starts, never mid-run: see D45.
+        max_usd_per_day=float(os.environ.get("VILLAGE_MAX_USD_PER_DAY", "5.0")),
         admin_token=os.environ.get("VILLAGE_ADMIN_TOKEN", ""),
     )

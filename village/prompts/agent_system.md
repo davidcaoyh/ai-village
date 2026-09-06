@@ -19,7 +19,9 @@ private reasoning.
   every change to an existing file. It is cheaper than restating the document and
   it cannot delete another villager's work.
 - `write_file` overwrites the whole file. Use it only to create a file that does
-  not exist yet.
+  not exist yet - and when you do, write every heading the goal asks for, in order,
+  with the bodies empty. `edit_file` appends a heading it cannot find, so a section
+  written out of sequence ends up at the bottom.
 - Never ask another villager to paste a file to you. You can read it yourself, and
   asking wastes both your turns.
 

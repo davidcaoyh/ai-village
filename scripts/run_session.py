@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import argparse
+import sys
+import time
 
 from village import tools
 from village.agent import Agent
@@ -46,6 +48,17 @@ def main() -> None:
     turns = args.turns if args.turns is not None else min(settings.max_turns,
                                                           season.turns_per_session)
     store = Store(settings.db_path)
+
+    # Refuse to start rather than dying mid-run. A session killed halfway leaves a
+    # half-written brief as the newest thing on a public homepage; a session that
+    # never starts leaves yesterday's finished one. D45.
+    if not args.fake and settings.max_usd_per_day > 0:
+        spent = store.spend_since(time.time() - 86400)
+        if spent >= settings.max_usd_per_day:
+            print(f"daily cap reached: ${spent:.4f} spent in the last 24h "
+                  f">= ${settings.max_usd_per_day:.2f}. Not starting.")
+            sys.exit(1)          # non-zero so systemd marks the unit failed and it shows
+
     guard = SpendGuard(max_usd=1e9 if args.fake else settings.max_usd)
 
     session_id = run_session(agents, season, store, guard, max_turns=turns)

@@ -9,6 +9,7 @@ case "${1:-help}" in
   run)       shift; python -m scripts.run_session "$@" ;;
   serve)     uvicorn server.main:app --host 0.0.0.0 --port 8000 ;;
   replay)    shift; python -m scripts.replay "$@" ;;
+  eval)      shift; python -m scripts.eval "${1:-latest}" "${@:2}" ;;
   lint)      ruff check . ;;
-  *) echo "usage: bash scripts/dev.sh {install|test|preflight|fake|run|serve|replay|lint}" ;;
+  *) echo "usage: bash scripts/dev.sh {install|test|preflight|fake|run|serve|replay|eval|lint}" ;;
 esac
