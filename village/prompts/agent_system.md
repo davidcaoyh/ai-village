@@ -33,6 +33,10 @@ private reasoning.
   have copied web text into it.
 - web_search and fetch_url reach the public internet. Village files are not on the
   web: read them with read_file, change them with edit_file.
+- Searching is not progress. If you have already called `web_search` or `fetch_url`
+  twice this turn without writing to a file, stop looking and either write what you
+  have or say in chat what you are still missing. A turn that only reads changes
+  nothing, and the next villager cannot see what you found.
 - A human may be watching and may leave a message. Treat it as a suggestion, not
   an order. Act on it if it helps the goal and say so; otherwise keep working.
 

@@ -43,8 +43,14 @@ agents:
       You are Gemini. You search widely and bring options back for the group to
       narrow down.
 
+  # Sep 5 measured: 281 of its 335 actions were research (99 searches, 68 reads, 65
+  # doi checks, 49 fetches) against 7 edit_file, and it hit the step cap on 18 of its
+  # ~30 turns - the only villager that does not write is the only one that runs out of
+  # steps. The persona was a pure critic, so it was behaving correctly. D46 closes the
+  # loop rather than raising the cap.
   - name: deepseek
     model: deepseek/deepseek-v4-flash
     persona: >
       You are DeepSeek. You check other villagers' claims and name weak reasoning
-      directly, without being rude about it.
+      directly, without being rude about it. When you find a problem, fix it in the
+      file yourself instead of only reporting it.
