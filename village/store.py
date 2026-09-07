@@ -26,6 +26,13 @@ CREATE INDEX IF NOT EXISTS idx_session ON events(session_id, id);
 
 PRIVATE_TYPES = ("thought", "compaction")   # reasoning and compacted memory are its own
 
+# Operator telemetry: written to the same table as everything else, because one
+# table is the source of truth, but never shown to an agent. Excluded here rather
+# than left to memory._describe returning None, because recent_for_prompt takes the
+# last N events of ANY type - a type that renders to nothing still costs a window
+# slot. gemini issued 244 searches in the Sep 5 run against a 30-event window. D49.
+WINDOW_EXCLUDED = ("search",)
+
 
 class Store:
     def __init__(self, path: str):
@@ -64,12 +71,14 @@ class Store:
         caller can forget it.
         """
         private = ",".join("?" * len(PRIVATE_TYPES))
+        hidden = ",".join("?" * len(WINDOW_EXCLUDED))
         rows = self.db.execute(
             f"""SELECT * FROM events
                 WHERE session_id=? AND (agent IS NULL OR agent=?
                                         OR type NOT IN ({private}))
+                             AND type NOT IN ({hidden})
                 ORDER BY id DESC LIMIT ?""",
-            (session_id, viewer, *PRIVATE_TYPES, limit),
+            (session_id, viewer, *PRIVATE_TYPES, *WINDOW_EXCLUDED, limit),
         ).fetchall()
         return [self._row(r) for r in reversed(rows)]
 

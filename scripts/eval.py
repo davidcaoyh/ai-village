@@ -21,7 +21,8 @@ import argparse
 import json
 import sqlite3
 import sys
-from pathlib import Path
+
+from scripts._dbsafe import connect_readonly
 
 # What a row of the scoreboard holds. Adding a metric means adding a key here and
 # a query below; `render()` derives its columns from COLUMNS, not from the data,
@@ -58,14 +59,10 @@ FAILED_RESULT = """(   json_extract(payload_json,'$.text') LIKE 'Error%'
 
 
 def connect(path: str) -> sqlite3.Connection:
-    # sqlite3.connect() happily creates an empty database for a path that does not
-    # exist, so a wrong --db reads as a session with no events - a table of zeros
-    # rather than an error. Every number here is evidence; fail instead.
-    if not Path(path).exists():
-        sys.exit(f"no database at {path}. Pass --db, or run from the project root.")
-    db = sqlite3.connect(path)
-    db.row_factory = sqlite3.Row
-    return db
+    # Read-only, and guarded against being run as the wrong user - see
+    # scripts/_dbsafe.py. The eval is most useful run against the live database on
+    # the box, which is exactly where opening it read-write as root does damage.
+    return connect_readonly(path)
 
 
 # --- the queries ----------------------------------------------------------
@@ -199,6 +196,30 @@ def tool_mix(db, session: str) -> dict[str, dict[str, int]]:
     return out
 
 
+def search_cost(db, session: str) -> dict[str, dict]:
+    """What search cost, per agent - the one spend the model bill never showed.
+
+    `spend()` sums `thought.usd`, which is what OpenRouter reports on a chat
+    completion. A search is a requests.post to another vendor and appears in no
+    thought. Measured Sep 5: $0.27 of models against ~$3.10 of Tavily, and the
+    only reason the second number was ever known is that it was reconstructed by
+    hand from a tool-mix count. This query is that reconstruction, made routine.
+    """
+    rows = db.execute(
+        """SELECT agent,
+                  COUNT(*)                                            AS searches,
+                  SUM(json_extract(payload_json,'$.cached'))          AS cached,
+                  SUM(json_extract(payload_json,'$.credits'))         AS credits,
+                  SUM(json_extract(payload_json,'$.usd'))             AS search_usd,
+                  SUM(CASE WHEN json_extract(payload_json,'$.near_dup_ratio')
+                           IS NOT NULL THEN 1 ELSE 0 END)             AS near_dups
+           FROM events WHERE session_id=? AND type='search' AND agent IS NOT NULL
+           GROUP BY agent""",
+        (session,),
+    ).fetchall()
+    return {r["agent"]: dict(r) for r in rows}
+
+
 def session_facts(db, session: str) -> dict:
     """One row about the run itself: goal, cast, turns, cost, why it ended.
 
@@ -277,6 +298,25 @@ def render_tools(mix: dict[str, dict[str, int]]) -> str:
     return "\n".join(out)
 
 
+def render_search(cost: dict[str, dict]) -> str:
+    """Search spend beside the model spend it has always hidden behind."""
+    def row(name, searches, cached, dups, usd):
+        return f"  {name:10}{searches:>9}{cached:>8}{dups:>10}{usd:>11}"
+
+    out = [row("", "searches", "cached", "near-dup", "usd"), "  " + "-" * 48]
+    total = 0.0
+    for agent in sorted(cost):
+        c = cost[agent]
+        usd = c["search_usd"] or 0
+        total += usd
+        out.append(row(agent, c["searches"], c["cached"] or 0, c["near_dups"] or 0,
+                       f"${usd:.4f}"))
+    out.append(row("total", sum(c["searches"] for c in cost.values()),
+                   sum(c["cached"] or 0 for c in cost.values()),
+                   sum(c["near_dups"] or 0 for c in cost.values()), f"${total:.4f}"))
+    return "\n".join(out)
+
+
 def render_header(facts: dict) -> str:
     return "\n".join(f"  {k:14} {v}" for k, v in facts.items())
 
@@ -305,7 +345,8 @@ def main() -> None:
     rows = build(db, session)
     if args.json:
         print(json.dumps({"session": session, "facts": session_facts(db, session),
-                          "agents": rows, "tools": tool_mix(db, session)}, indent=2))
+                          "agents": rows, "tools": tool_mix(db, session),
+                          "search": search_cost(db, session)}, indent=2))
         return
 
     print(f"\nsession {session}\n")
@@ -314,6 +355,10 @@ def main() -> None:
     print(render(rows))
     print("\ntools used\n")
     print(render_tools(tool_mix(db, session)))
+    search = search_cost(db, session)
+    if search:
+        print("\nsearch\n")
+        print(render_search(search))
     print()
 
 

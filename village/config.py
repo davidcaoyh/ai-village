@@ -34,10 +34,15 @@ class SeasonConfig:
     goal: str
     turns_per_session: int = 60
     seconds_between_turns: float = 2
+    seconds_between_steps: float = 0    # inside a turn; 0 is back-to-back
     context_window_events: int = 30
     compaction_every_turns: int = 20
     max_steps_per_turn: int = 6
     max_idle_rounds: int = 3        # rounds with no goal-moving action; 0 disables
+    # Distinct (uncached) searches one villager may issue in one turn; 0 disables.
+    # The cache makes a repeat free; only this stops an agent spending a whole
+    # turn on new queries it will not read. D50.
+    max_searches_per_turn: int = 0
     goals: list[str] = field(default_factory=list)
     # With repeat on, a met goal starts another round on a fresh file instead of
     # ending the session, so a season with one goal runs until the turn cap.
@@ -108,6 +113,7 @@ def load_season(path: str) -> SeasonConfig:
         compaction_every_turns=session.get("compaction_every_turns", 20),
         max_steps_per_turn=session.get("max_steps_per_turn", 6),
         max_idle_rounds=session.get("max_idle_rounds", 3),
+        max_searches_per_turn=session.get("max_searches_per_turn", 0),
         repeat=bool(raw.get("repeat", False)),
         artifact_stem=raw.get("artifact_stem", "brief"),
     )

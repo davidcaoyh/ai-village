@@ -113,6 +113,8 @@ def run_session(agents, season, store, spend_guard, session_id: str | None = Non
     })
 
     turns_taken = {a.name: 0 for a in agents}
+    # One per session, shared by every villager. See ToolContext.search_cache.
+    search_cache: dict[str, str] = {}
     failed_in_a_row = 0
     last_action = store.newest_substantive_action(session_id, IDLE_EXEMPT)
     idle_turns = 0
@@ -136,7 +138,8 @@ def run_session(agents, season, store, spend_guard, session_id: str | None = Non
                 agent.compact(store, season, spend_guard, session_id)
 
             ctx = agent.take_turn(store, season, spend_guard, session_id,
-                                 runs_dir=runs_dir, max_steps=season.max_steps_per_turn)
+                                 runs_dir=runs_dir, max_steps=season.max_steps_per_turn,
+                                 search_cache=search_cache)
             turns_taken[agent.name] += 1
 
             # One villager failing to reach the provider is that villager's turn.

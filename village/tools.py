@@ -27,6 +27,31 @@ READ_LIMIT = 8000           # chars of a village file, big enough for a whole br
 SEARCH_RESULTS = 5
 HTTP_TIMEOUT = 20
 
+# Tavily bills 1 credit per basic search, 2 per advanced, at $0.008 a credit
+# (verified Sep 6, 2026). _search_tavily sends no search_depth, so every call is
+# basic. ddgs is keyless and free. Priced here rather than in llm.py because
+# SpendGuard sums what OpenRouter reports, and a requests.post to a search
+# vendor reports nothing: the Sep 5 session spent $0.27 on models and ~$3.10 on
+# search, and nothing in the system could see the larger number. D49.
+TAVILY_USD_PER_CREDIT = 0.008
+SEARCH_CREDITS = {"tavily": 1, "duckduckgo": 0, "cache": 0}
+
+# Stripped before a query is used as a cache key, so "effect of X on Y" and
+# "the effect of X on Y" are one search rather than two.
+QUERY_STOPWORDS = frozenset(
+    "a an and are as at be by do does for from how in is it its of on or that the "
+    "their they this to vs was were what when where which who why with".split()
+)
+QUERY_PUNCT = re.compile(r"[^a-z0-9\s]+")
+
+# Reported, not enforced. Two queries above this share most of their tokens, which
+# is what gemini's rotating-suffix enumeration looks like: one base question with
+# "virtual reality", "augmented reality", "machine learning" swapped on the end.
+# Collapsing them automatically would also collapse "policy in canada" against
+# "policy in germany", which is a real distinction, so the threshold is measured
+# for a run before it is allowed to refuse anything. D50.
+NEAR_DUPLICATE_RATIO = 0.6
+
 # Identifiable on purpose. Spoofing a browser would cut the 403s, but a 403 is a site
 # declining to be read by a bot, and the agent is told to go elsewhere instead. D38.
 FETCH_HEADERS = {
@@ -66,6 +91,18 @@ class ToolContext:
     # Agent.take_turn, and the step cap is a within-turn budget, so that is the scope
     # that matters. Across turns the agent sees its own failure in the rolling window.
     failed_urls: dict[str, str] = field(default_factory=dict)
+    # normalised query -> the observation it produced. SESSION-scoped, unlike
+    # failed_urls: the orchestrator owns one dict and hands it to every turn, so a
+    # question gemini asked at turn 6 is free when deepseek asks it at turn 40.
+    # Four villagers researching one goal overlap heavily, and the enumeration
+    # pattern this exists for spans three turns at max_steps_per_turn: 8.
+    # Passed in rather than held in a module global, so a test and preflight.py
+    # each get their own and the tool stays exercisable on its own.
+    search_cache: dict[str, str] = field(default_factory=dict)
+    searches_this_turn: int = 0
+    # 0 disables. A cap on distinct searches per turn is the only thing that stops
+    # an agent spending a whole turn enumerating; the cache only makes repeats free.
+    max_searches_per_turn: int = 0
 
     @property
     def artifacts_dir(self) -> Path:
@@ -138,6 +175,22 @@ def send_chat(ctx: ToolContext, message: str) -> str:
 @tool("web_search", "Search the web. Returns titles, urls and snippets.",
       {"query": {"type": "string"}}, ["query"])
 def web_search(ctx: ToolContext, query: str) -> str:
+    key = _normalise_query(query)
+
+    # A repeat is served from the session cache and costs nothing. This is a
+    # refusal in cost terms and a success in the agent's terms: it gets the
+    # results it asked for, so nothing has to be explained to it in a prompt.
+    if key and key in ctx.search_cache:
+        _log_search(ctx, query, "cache", cached=True, results=SEARCH_RESULTS)
+        return ctx.search_cache[key]
+
+    if (ctx.max_searches_per_turn
+            and ctx.searches_this_turn >= ctx.max_searches_per_turn):
+        _log_search(ctx, query, "budget", cached=False, results=0)
+        return (f"You have used this turn's {ctx.max_searches_per_turn} searches. "
+                "Use what you already found - fetch one of those urls, or write "
+                "the section - and search again next turn.")
+
     results, backend = [], "duckduckgo"
     if _tavily_key():
         try:
@@ -147,12 +200,77 @@ def web_search(ctx: ToolContext, query: str) -> str:
             # search results, so fall through rather than reporting our plumbing.
             results = []
     if not results:
-        results = _search_duckduckgo(query)
+        results, backend = _search_duckduckgo(query), "duckduckgo"
+
+    ctx.searches_this_turn += 1
+    _log_search(ctx, query, backend, cached=False, results=len(results),
+                near_dup=_nearest_prior(key, ctx.search_cache))
+
     if not results:
+        # Not cached. An empty result is usually the backend rate-limiting, not a
+        # fact about the query, and caching it would make one throttled call
+        # poison that question for the rest of the session.
         return "No results (both search backends returned nothing)."
+
     lines = [f"{i}. {r['title']}\n   {r['url']}\n   {r['snippet']}"
              for i, r in enumerate(results[:SEARCH_RESULTS], 1)]
-    return f"[{backend}] results for {query!r}:\n" + "\n".join(lines)
+    observation = f"[{backend}] results for {query!r}:\n" + "\n".join(lines)
+    if key:
+        ctx.search_cache[key] = observation
+    return observation
+
+
+def _log_search(ctx: ToolContext, query: str, backend: str, cached: bool,
+                results: int, near_dup: tuple[float, str] | None = None) -> None:
+    """The one event in the system that carries a non-model cost.
+
+    Excluded from the prompt window by `store.WINDOW_EXCLUDED`, so it is free to
+    write: it is read by scripts/eval.py and by nothing the model ever sees.
+    """
+    credits = SEARCH_CREDITS.get(backend, 0)
+    payload = {"query": query[:200], "backend": backend, "cached": cached,
+               "credits": credits, "usd": round(credits * TAVILY_USD_PER_CREDIT, 6),
+               "results": results}
+    if near_dup and near_dup[0] >= NEAR_DUPLICATE_RATIO:
+        payload["near_dup_ratio"] = round(near_dup[0], 3)
+        payload["near_dup_of"] = near_dup[1][:200]
+    ctx.log("search", payload)
+
+
+def _normalise_query(query: str) -> str:
+    """A cache key: lowercased, depunctuated, stopwords out, tokens sorted.
+
+    Sorted because "does X cause Y" and "Y caused by X" are the same search to a
+    backend. Returns "" for a query that is all stopwords, and "" never caches -
+    an empty key would collide every such query onto one entry.
+    """
+    tokens = _query_tokens(query)
+    return " ".join(sorted(tokens))
+
+
+def _query_tokens(query: str) -> set[str]:
+    words = QUERY_PUNCT.sub(" ", query.lower()).split()
+    return {w for w in words if w not in QUERY_STOPWORDS}
+
+
+def _nearest_prior(key: str, cache: dict[str, str]) -> tuple[float, str] | None:
+    """The most similar query already issued this session, by Jaccard overlap.
+
+    Measurement only - nothing branches on the result. See NEAR_DUPLICATE_RATIO.
+    """
+    if not key or not cache:
+        return None
+    tokens = set(key.split())
+    best: tuple[float, str] = (0.0, "")
+    for prior in cache:
+        other = set(prior.split())
+        union = tokens | other
+        if not union:
+            continue
+        ratio = len(tokens & other) / len(union)
+        if ratio > best[0]:
+            best = (ratio, prior)
+    return best if best[1] else None
 
 
 def _tavily_key() -> str | None:

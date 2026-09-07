@@ -47,7 +47,23 @@ constraints:
 session:
   turns_per_session: 120
   seconds_between_turns: 2
+  # Paces the live page. The Sep 5 run made ~650 model calls in 64 minutes, so a step
+  # every 30s stretches the same session across roughly five and a half hours, and 45s
+  # across eight. Nothing extra is spent: one long session costs one session, where
+  # seven back-to-back ones cost seven.
+  #
+  # 45 = one session filling a 09:00-17:00 window, which is what the timer now starts.
+  # Three settings have to agree or the run is cut off mid-session: this value, the
+  # timer's OnCalendar, and village-session.service's TimeoutStartSec. D51.
+  seconds_between_steps: 45
   context_window_events: 30
   compaction_every_turns: 8
   max_steps_per_turn: 8
   max_idle_rounds: 3
+  # Distinct searches one villager may issue per turn; 0 is off. Repeats are
+  # already free (the session search cache), so this only bites on NEW queries.
+  # Off for now on purpose: the Sep 5 run showed gemini spending 72% of its
+  # actions on search, but how much of that is genuine breadth and how much is
+  # enumeration is measured by the near-duplicate count in scripts/eval.py, not
+  # assumed. Set to 3 once a run has produced that number. D50.
+  max_searches_per_turn: 0

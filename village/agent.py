@@ -9,6 +9,7 @@ Everything else in this repo is arrangement around this function.
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -41,14 +42,28 @@ class Agent:
         return ctx
 
     def take_turn(self, store, season, spend_guard, session_id: str,
-                  runs_dir: str = "runs", max_steps: int = 6) -> tools.ToolContext:
+                  runs_dir: str = "runs", max_steps: int = 6,
+                  search_cache: dict | None = None) -> tools.ToolContext:
+        # The cache outlives the turn and the villager; everything else on the
+        # context is rebuilt here. The orchestrator owns it, so a search one
+        # villager paid for at turn 6 is free for the other three all session.
         ctx = tools.ToolContext(agent=self.name, runs_dir=runs_dir,
-                                session_id=session_id, store=store)
+                                session_id=session_id, store=store,
+                                search_cache=search_cache if search_cache is not None else {},
+                                max_searches_per_turn=getattr(
+                                    season, "max_searches_per_turn", 0))
         messages = memory.build_context(store, self, season, session_id, self.others)
         schemas = tools.schemas_for(self.tools)
         nudged = False
 
-        for _ in range(max_steps):
+        for step in range(max_steps):
+            # Paced inside the turn, not only between turns. A turn's steps used to run
+            # back to back and then the village went quiet for the turn gap, so a viewer
+            # saw a burst and then nothing. Costs nothing: the same calls, further apart.
+            # Stretching one session across the watching window is also what keeps the
+            # spend of a day-long run to one session's worth. D47.
+            if step and getattr(season, "seconds_between_steps", 0):
+                time.sleep(season.seconds_between_steps)
             try:
                 response = self.chat_fn(self.model, messages, schemas,
                                         self.temperature, self.max_tokens, self.reasoning)

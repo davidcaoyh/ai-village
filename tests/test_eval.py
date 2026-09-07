@@ -133,3 +133,44 @@ def test_render_prints_a_row_per_agent_and_never_raises(db):
                                "%", "step", "cap", "no", "tool", "dois", "ck", "dois", "fake"]
     assert len(lines) == 4                       # header, rule, two agents
     assert [ln.split()[0] for ln in lines[2:]] == ["a", "b"]   # most expensive first
+
+
+def test_search_cost_is_reported_separately_from_the_model_bill(tmp_path):
+    """The number the Sep 5 run could not see: $0.27 of models, ~$3.10 of search."""
+    store = Store(str(tmp_path / "s.db"))
+    s = "s2"
+    store.append(s, "a", "thought", {"usd": 0.01, "prompt_tokens": 1,
+                                     "completion_tokens": 1, "reasoning_tokens": 0})
+    for _ in range(3):
+        store.append(s, "a", "search", {"backend": "tavily", "cached": False,
+                                        "credits": 1, "usd": 0.008, "results": 5})
+    store.append(s, "a", "search", {"backend": "cache", "cached": True,
+                                    "credits": 0, "usd": 0.0, "results": 5})
+    store.append(s, "b", "search", {"backend": "tavily", "cached": False,
+                                    "credits": 1, "usd": 0.008, "results": 5,
+                                    "near_dup_ratio": 0.75, "near_dup_of": "x y z"})
+
+    db = ev.connect(str(tmp_path / "s.db"))
+    cost = ev.search_cost(db, s)
+
+    assert cost["a"]["searches"] == 4 and cost["a"]["cached"] == 1
+    assert round(cost["a"]["search_usd"], 4) == 0.024
+    assert cost["b"]["near_dups"] == 1
+    # The model bill is one hundredth of a dollar; search is three times that.
+    assert ev.spend(db, s)["a"]["usd"] < cost["a"]["search_usd"]
+    assert "$0.0240" in ev.render_search(cost)
+
+
+def test_search_events_do_not_disturb_the_existing_columns(tmp_path):
+    """A new event type must not be counted as an action or a failure."""
+    store = Store(str(tmp_path / "t.db"))
+    s = "s3"
+    store.append(s, "a", "action", {"name": "web_search", "arguments": {}})
+    store.append(s, "a", "result", {"name": "web_search", "text": "[tavily] results"})
+    store.append(s, "a", "search", {"backend": "tavily", "cached": False,
+                                    "credits": 1, "usd": 0.008, "results": 5})
+
+    db = ev.connect(str(tmp_path / "t.db"))
+
+    assert ev.actions(db, s)["a"]["actions"] == 1
+    assert ev.tool_mix(db, s)["a"] == {"web_search": 1}

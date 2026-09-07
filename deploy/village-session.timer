@@ -1,25 +1,34 @@
-# Back-to-back sessions, so the site is live when someone opens it.
+# One session a day, starting at 09:00 local time and filling the working day.
 #
-# OnUnitInactiveSec, not OnCalendar: the service is Type=oneshot, and a calendar
-# timer would fire while a session was still running. This one starts counting when
-# the last run *finished*, so two sessions can never overlap.
+# OnCalendar, not OnUnitInactiveSec. The back-to-back form was right when a session
+# took 64 minutes and the goal was "something is always happening"; it is wrong now
+# that one session is paced to cover the whole window, because it would start a
+# second run the moment the first ended. The original objection to OnCalendar - that
+# it can fire while a Type=oneshot service is still running - does not apply: systemd
+# will not start a second instance of a unit that is already active, so an overrunning
+# session makes the next day's trigger a no-op rather than an overlap.
+#
+# Local time, so set the box's timezone or this means 09:00 UTC:
+#   timedatectl set-timezone America/Toronto
+#
+# Three settings have to agree: season.yaml's seconds_between_steps (45 = ~8h), this
+# start time, and village-session.service's TimeoutStartSec (9h). D51.
 #
 # Before enabling this, run one session by hand and read the transcript, and set
 # VILLAGE_MAX_USD_PER_DAY - an unattended loop with only a per-session cap has no
 # ceiling on the day (D45).
 
 [Unit]
-Description=AI Village session, restarted after each one ends
+Description=AI Village session, one per day across the working day
 
 [Timer]
-OnUnitInactiveSec=5min
-OnBootSec=2min
-# Missed while the machine was down: start once it is back rather than waiting out
-# the full interval.
+OnCalendar=*-*-* 09:00:00
+# Missed while the machine was down: start once it is back rather than waiting a
+# whole day. A session that starts late still ends on the turn cap.
 Persistent=true
 # Four villagers all starting on the same minute as everyone else's cron is how
 # you meet a provider rate limit. Spread it.
-RandomizedDelaySec=60
+RandomizedDelaySec=300
 
 [Install]
 WantedBy=timers.target

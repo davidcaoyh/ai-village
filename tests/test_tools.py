@@ -280,3 +280,159 @@ def test_a_doi_lifted_out_of_a_pdf_url_loses_the_extension(ctx, monkeypatch):
     _run("resolve_doi", {"doi": "https://x.org/10.1257/aer.101.7.3078.pdf"}, ctx)
 
     assert seen[0].endswith("10.1257/aer.101.7.3078")
+
+
+# --- search cost ----------------------------------------------------------
+# The Sep 5 session spent $0.27 on models and ~$3.10 on Tavily, and nothing in
+# the system could see the second number. These pin the three parts of the fix:
+# a repeat is free, the spend is logged, and the log stays out of the prompt.
+
+class _SearchStub:
+    """Stands in for both backends. Counts calls so 'free' means no network."""
+
+    def __init__(self):
+        self.queries: list[str] = []
+
+    def __call__(self, query: str):
+        self.queries.append(query)
+        return [{"title": f"result for {query}", "url": "https://e.example/1",
+                 "snippet": "..."}]
+
+
+@pytest.fixture
+def search(monkeypatch):
+    stub = _SearchStub()
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.setattr(tools, "_search_duckduckgo", stub)
+    return stub
+
+
+def test_a_repeated_search_costs_no_network_call(ctx, search):
+    first = _run("web_search", {"query": "does education cause earnings"}, ctx)
+    second = _run("web_search", {"query": "does education cause earnings"}, ctx)
+
+    assert first == second
+    assert len(search.queries) == 1
+
+
+def test_case_punctuation_stopwords_and_word_order_do_not_defeat_the_cache(ctx, search):
+    """What the key normalises away, and no more.
+
+    Deliberately not a stemmer: "cause" and "caused" stay two searches. Matching
+    beyond exact tokens is a judgement about meaning, and this cache is only
+    allowed to be free where it is certainly right. The morphological and
+    synonym cases are counted by the near-duplicate measure instead.
+    """
+    _run("web_search", {"query": "does education cause earnings"}, ctx)
+    _run("web_search", {"query": "Earnings - does education cause?"}, ctx)
+
+    assert len(search.queries) == 1
+
+
+def test_a_different_question_is_still_searched(ctx, search):
+    _run("web_search", {"query": "does education cause earnings"}, ctx)
+    _run("web_search", {"query": "does minimum wage cause unemployment"}, ctx)
+
+    assert len(search.queries) == 2
+
+
+def test_the_cache_is_shared_across_villagers(ctx, search):
+    """Session-scoped, not turn-scoped: four villagers on one goal overlap."""
+    other = tools.ToolContext(agent="gemini", session_id="s1",
+                              search_cache=ctx.search_cache)
+    _run("web_search", {"query": "does education cause earnings"}, ctx)
+    _run("web_search", {"query": "does education cause earnings"}, other)
+
+    assert len(search.queries) == 1
+
+
+def test_an_empty_result_is_not_cached(ctx, monkeypatch):
+    """An empty answer is usually throttling, not a fact about the query.
+
+    Caching it would let one rate-limited call poison that question for the
+    whole session - the exact failure mode ddgs has and Tavily does not.
+    """
+    calls: list[str] = []
+
+    def empty(query: str):
+        calls.append(query)
+        return []
+
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.setattr(tools, "_search_duckduckgo", empty)
+    _run("web_search", {"query": "does education cause earnings"}, ctx)
+    _run("web_search", {"query": "does education cause earnings"}, ctx)
+
+    assert len(calls) == 2
+
+
+def test_the_turn_budget_stops_new_queries_but_not_cached_ones(ctx, search):
+    ctx.max_searches_per_turn = 2
+    _run("web_search", {"query": "does education cause earnings"}, ctx)
+    _run("web_search", {"query": "does minimum wage cause unemployment"}, ctx)
+    blocked = _run("web_search", {"query": "does trade cause growth"}, ctx)
+    repeat = _run("web_search", {"query": "does education cause earnings"}, ctx)
+
+    assert "used this turn's 2 searches" in blocked
+    assert "result for does education cause earnings" in repeat
+    assert len(search.queries) == 2
+
+
+def test_search_spend_is_logged_where_the_model_bill_cannot_see_it(tmp_path,
+                                                                  monkeypatch):
+    """Tavily bills per call and reports nothing SpendGuard reads."""
+    from village.store import Store
+
+    store = Store(str(tmp_path / "v.db"))
+    ctx = tools.ToolContext(agent="claude", runs_dir=str(tmp_path),
+                            session_id="s1", store=store)
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-real-key")
+    monkeypatch.setattr(tools, "_search_tavily", _SearchStub())
+    _run("web_search", {"query": "does education cause earnings"}, ctx)
+    _run("web_search", {"query": "does education cause earnings"}, ctx)
+
+    events = [e for e in store.tail("s1") if e["type"] == "search"]
+    assert [e["payload"]["backend"] for e in events] == ["tavily", "cache"]
+    assert [e["payload"]["usd"] for e in events] == [0.008, 0.0]
+
+
+def test_a_search_event_never_costs_a_prompt_window_slot(tmp_path, monkeypatch):
+    """recent_for_prompt takes the last N events of any type, so a type that
+    renders to nothing still displaces a chat line. gemini logged 244 searches
+    against a 30-event window."""
+    from village.store import Store
+
+    store = Store(str(tmp_path / "v.db"))
+    ctx = tools.ToolContext(agent="claude", runs_dir=str(tmp_path),
+                            session_id="s1", store=store)
+    store.append("s1", "claude", "chat", {"message": "I will take the Evidence section"})
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.setattr(tools, "_search_duckduckgo", _SearchStub())
+    for i in range(5):
+        _run("web_search", {"query": f"question number {i}"}, ctx)
+
+    window = store.recent_for_prompt("s1", "claude", 3)
+    assert [e["type"] for e in window] == ["chat"]
+
+
+def test_near_duplicates_are_measured_and_not_refused(ctx, search):
+    """The rotating-suffix pattern: one base query, one token swapped.
+
+    Reported so a threshold can be set from a real run. Not enforced: the same
+    shape separates 'policy in canada' from 'policy in germany'.
+    """
+    ctx.store = _Recorder()
+    _run("web_search", {"query": "does remote work cause virtual reality adoption"}, ctx)
+    _run("web_search", {"query": "does remote work cause augmented reality adoption"}, ctx)
+
+    assert len(search.queries) == 2                    # both really ran
+    assert ctx.store.events[-1]["near_dup_ratio"] >= tools.NEAR_DUPLICATE_RATIO
+
+
+class _Recorder:
+    def __init__(self):
+        self.events: list[dict] = []
+
+    def append(self, session_id, agent, type, payload):
+        if type == "search":
+            self.events.append(payload)

@@ -90,3 +90,42 @@ def test_a_fake_run_is_never_gated(tmp_path):
 
     assert out.returncode == 0
     assert "daily cap reached" not in out.stdout
+
+
+# --- pacing: the page moves steadily, and it must never slow the suite ---
+
+def test_steps_inside_a_turn_are_paced_when_the_season_asks(monkeypatch):
+    """The sleep is per step, not per turn, so a viewer sees steady motion not bursts."""
+    import village.agent as agent_mod
+    from village.agent import Agent
+    from village.config import SeasonConfig
+    from village.llm import LLMResponse, SpendGuard
+
+    slept = []
+    monkeypatch.setattr(agent_mod.time, "sleep", slept.append)
+
+    calls = iter([
+        LLMResponse(text=None, tool_calls=[{"id": "1", "name": "send_chat",
+                    "arguments": {"message": "hi"}, "parse_error": None}],
+                    finish_reason="tool_calls", prompt_tokens=1, completion_tokens=1,
+                    reasoning_tokens=0, usd=0.0, raw={}),
+        LLMResponse(text=None, tool_calls=[{"id": "2", "name": "end_turn",
+                    "arguments": {"summary": "done"}, "parse_error": None}],
+                    finish_reason="tool_calls", prompt_tokens=1, completion_tokens=1,
+                    reasoning_tokens=0, usd=0.0, raw={}),
+    ])
+    season = SeasonConfig(season_id="t", goal="g", seconds_between_steps=30)
+    a = Agent(name="a", model="m", persona="p", tools=["send_chat", "end_turn"],
+              chat_fn=lambda *args, **kw: next(calls))
+
+    store = Store(":memory:")
+    a.take_turn(store, season, SpendGuard(1.0), "s1", max_steps=4)
+
+    assert slept == [30]        # two calls, one gap - never before the first
+
+
+def test_a_season_that_does_not_ask_for_pacing_never_sleeps(monkeypatch):
+    """Default 0, so the offline suite and --fake stay instant."""
+    from village.config import SeasonConfig
+
+    assert SeasonConfig(season_id="t", goal="g").seconds_between_steps == 0

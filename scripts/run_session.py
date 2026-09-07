@@ -27,6 +27,8 @@ def main() -> None:
     ap.add_argument("--turns", type=int, default=None)
     ap.add_argument("--only", default=None, help="run a single villager, for debugging")
     ap.add_argument("--delay", type=float, default=None, help="seconds between turns")
+    ap.add_argument("--step-delay", type=float, default=None,
+                    help="seconds between steps inside a turn; paces the live page")
     ap.add_argument("--fake", action="store_true",
                     help="offline cast: no API key, no network, no spend")
     args = ap.parse_args()
@@ -38,6 +40,12 @@ def main() -> None:
     season = load_season(args.season)
     if args.delay is not None:
         season.seconds_between_turns = args.delay
+    if args.step_delay is not None:
+        season.seconds_between_steps = args.step_delay
+    elif args.fake:
+        # The offline cast exists to run fast; pacing is for the page, and nobody is
+        # watching a fake run.
+        season.seconds_between_steps = 0
 
     agents = [Agent(name=c.name, model=c.model, persona=c.persona, tools=c.tools,
                     temperature=c.temperature, max_tokens=c.max_tokens,

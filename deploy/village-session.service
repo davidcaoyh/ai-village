@@ -17,9 +17,13 @@ WorkingDirectory=/opt/village
 EnvironmentFile=/etc/village.env
 ExecStart=/opt/village/.venv/bin/python -m scripts.run_session
 
-# A session that hangs on a provider must not still be running when the next
-# one starts. Two hours is far beyond a 120-turn run at 2s spacing.
-TimeoutStartSec=7200
+# A session that hangs on a provider must not still be running when the next one
+# starts. This has to exceed the paced length of a full session, not the unpaced
+# one: at seconds_between_steps: 45 a 120-turn run takes ~8 hours, and the old
+# 7200 (2h) - correct when a run took 64 minutes - would have killed it at about
+# turn 30 with no error anywhere except the journal. Nine hours leaves an hour of
+# slack over the 09:00-17:00 window. D51.
+TimeoutStartSec=32400
 
 NoNewPrivileges=true
 PrivateTmp=true
