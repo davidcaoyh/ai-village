@@ -109,6 +109,7 @@ def load_season(path: str) -> SeasonConfig:
         constraints=raw.get("constraints", []),
         turns_per_session=session.get("turns_per_session", 60),
         seconds_between_turns=session.get("seconds_between_turns", 2),
+        seconds_between_steps=session.get("seconds_between_steps", 0),
         context_window_events=session.get("context_window_events", 30),
         compaction_every_turns=session.get("compaction_every_turns", 20),
         max_steps_per_turn=session.get("max_steps_per_turn", 6),

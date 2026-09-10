@@ -101,6 +101,13 @@
 <script>
 const cols = {};            // agent name -> {actions feed}
 const FEED_MAX = 200;       // a session is turn-capped, but a raised cap must not grow the dom forever
+
+// Replay of a finished run is thousands of events in one loop. Reading
+// scrollHeight per event forces a layout each time, which is ~90% of the boot
+// cost on a 2800-event session. During a batch, collect the feeds and scroll
+// each one once at the end.
+let replaying = false;
+const pendingScroll = new Set();
 let session = null, lastId = 0, turn = 0;
 
 function el(tag, cls, txt) {
@@ -142,7 +149,7 @@ function push(feed, kind, text, ts) {
   // textContent, never innerHTML: a villager can emit anything, including a <script> tag.
   wrap.append(el('div', kind, text));
   feed.append(wrap);
-  feed.scrollTop = feed.scrollHeight;
+  if (replaying) pendingScroll.add(feed); else feed.scrollTop = feed.scrollHeight;
   while (feed.children.length > FEED_MAX) feed.firstChild.remove();
 }
 
@@ -275,7 +282,8 @@ function chatLine(who, text, cls, ts) {
   wrap.append(stamp(ts));
   wrap.append(el('span', cls, who + ': '));
   wrap.append(el('span', 'chat', text));
-  c.append(wrap); c.scrollTop = c.scrollHeight;
+  c.append(wrap);
+  if (replaying) pendingScroll.add(c); else c.scrollTop = c.scrollHeight;
   while (c.children.length > FEED_MAX) c.firstChild.remove();
   document.getElementById('chatcount').textContent = c.children.length + ' messages';
 }
@@ -287,7 +295,14 @@ function apply(data) {
   }
   if (data.cost !== undefined) document.getElementById('cost').textContent = '$' + data.cost.toFixed(4);
   if (data.stopped) document.getElementById('turn').textContent = 'stopped';
-  (data.events || []).forEach(e => { render(e); lastId = Math.max(lastId, e.id); });
+  const events = data.events || [];
+  replaying = events.length > 1;
+  events.forEach(e => { render(e); lastId = Math.max(lastId, e.id); });
+  if (replaying) {
+    replaying = false;
+    pendingScroll.forEach(f => { f.scrollTop = f.scrollHeight; });
+    pendingScroll.clear();
+  }
 }
 
 async function send() {
